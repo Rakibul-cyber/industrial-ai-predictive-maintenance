@@ -167,3 +167,69 @@ def test_app_renders_interval_fields(data_dir: Path, monkeypatch: pytest.MonkeyP
     assert {"rul_lower", "rul_upper"} <= set(at.dataframe[0].value.columns)
     assert any("Shaded: 80 % prediction interval" in c.value for c in at.caption)
     assert len(at.table) >= 3  # model card, intervals, metrics
+
+
+ANOMALY_INFO = {
+    "model_version": "anomaly-test",
+    "for_model_version": "test-v1",
+    "method": "mahalanobis_ledoitwolf",
+    "threshold": 5.4,
+    "threshold_quantile": 0.99,
+    "healthy_rows": 5329,
+    "trained_at": "2026-11-08T20:00:00Z",
+    "trend_median_train_oof": None,
+    "false_alarm_rate_healthy": 0.0101,
+    "detection_fraction_of_life_median": None,
+    "detection_true_rul_median": None,
+    "never_flagged_fraction": 0.02,
+    "acceptance_met": False,
+}
+
+
+def _anomaly_body(payload: dict[str, Any], include_series: bool) -> dict[str, Any]:
+    cycles = [r["cycle"] for r in payload["records"]]
+    body = {
+        "unit_id": payload.get("unit_id"),
+        "last_cycle": cycles[-1],
+        "anomaly_score": 6.5,
+        "normalized_score": 1.2,
+        "threshold": 5.4,
+        "is_anomalous": True,
+        "model_version": "anomaly-test",
+        "series": None,
+    }
+    if include_series:
+        body["series"] = [{"cycle": c, "normalized_score": 0.01 * c} for c in cycles[29:]]
+    return body
+
+
+@pytest.mark.parametrize("anomaly_up", [True, False])
+def test_app_renders_anomaly_fields(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch, anomaly_up: bool
+) -> None:
+    health = {**HEALTH, "anomaly_loaded": anomaly_up}
+    info = {**INFO, "anomaly": ANOMALY_INFO if anomaly_up else None}
+    calls: list[bool] = []
+    monkeypatch.setattr(ApiClient, "health", lambda self: ApiResult(True, 200, health))
+    monkeypatch.setattr(ApiClient, "model_info", lambda self: ApiResult(True, 200, info))
+    monkeypatch.setattr(ApiClient, "predict", lambda self, p: ApiResult(True, 200, _prediction(p)))
+
+    def anomaly(self: ApiClient, payload: dict[str, Any], include_series: bool = False):
+        calls.append(include_series)
+        return ApiResult(True, 200, _anomaly_body(payload, include_series))
+
+    monkeypatch.setattr(ApiClient, "anomaly", anomaly)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    assert not at.exception
+    has_score = any("Anomaly score 1.20" in c.value for c in at.caption)
+    has_table = any(s.value == "Anomaly detector" for s in at.subheader)
+    assert has_score is anomaly_up and has_table is anomaly_up
+    at.button[0].click().run()  # trajectory
+    assert not at.exception
+    has_chart = any(s.value == "Anomaly score over the engine's life" for s in at.subheader)
+    assert has_chart is anomaly_up
+    if anomaly_up:
+        assert calls.count(True) == 1  # ONE series call for the whole trajectory
+    else:
+        assert not calls  # never called when the API reports no detector

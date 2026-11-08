@@ -144,3 +144,16 @@ Append to the "Change records" section below **before** implementing, and get us
 | Affected docs | 10, 14. |
 | Regression tests | Smoke test re-run while the demo stack was still up; CI `docker` job on the next push. |
 | Approval | Defect fix within the authorized milestone (M8). |
+
+### CR-010 — Minimal anomaly detection (post-MVP extension, Milestone 9) (2026-11-08)
+
+| Field | Content |
+|---|---|
+| Reason | Approved scope extension (§1.4), authorized by the user on 2026-11-08. The charter listed anomaly detection as an optional extension gated on a valid evaluation strategy; with no anomaly labels in C-MAPSS, that strategy is defined in ADR-035 (trend with degradation, false alarms on a healthy reference, detection timing, test-engine flags by true-RUL bucket, agreement with the RUL model). |
+| Evidence | 00 §6 / 16 §8 (anomaly detection NOT IMPLEMENTED); CR-007 / ADR-033 (title restricted until implemented); M9 authorization. |
+| Impact | New artifact pair (`models/model_anomaly.joblib` + metadata), `scripts/train.py --model anomaly`, additive API (`POST /anomaly`, `/health.anomaly_loaded`, `/model/info.anomaly`, error `ANOMALY_UNAVAILABLE`), dashboard additions, `api_version` 0.3.0. The point and interval models are unchanged. scipy (for `spearmanr`) is already resolvable as a scikit-learn dependency (1.18.1), so it is not pinned explicitly. |
+| Smallest fix | Standardised rolling-mean sensors → Ledoit-Wolf covariance → Mahalanobis distance with an out-of-fold 99th-percentile threshold (ADR-035); at most one IsolationForest fallback. |
+| Affected docs | 00, 01, 02, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 16, 17, README, CLAUDE.md. |
+| Regression tests | New anomaly tests (synthetic drift, OOF threshold, inference, API, dashboard, real data); full suite with the 85 % gate. |
+| Approval | Authorized by the user on 2026-11-08 (M9 authorization). |
+

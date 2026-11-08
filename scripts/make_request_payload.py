@@ -15,7 +15,13 @@ from pathlib import Path
 from predmaint.api.service import expected_prediction, request_payload
 from predmaint.config import get_settings
 from predmaint.data.load import load_fd001
-from predmaint.models.predict import ModelNotAvailableError, load_interval_model, load_model
+from predmaint.models.predict import (
+    AnomalyNotAvailableError,
+    ModelNotAvailableError,
+    load_anomaly_model,
+    load_interval_model,
+    load_model,
+)
 
 
 def main() -> int:
@@ -51,7 +57,13 @@ def main() -> int:
             intervals = load_interval_model()
         except ModelNotAvailableError:
             intervals = None
-        sidecar[args.out.name] = expected_prediction(payload, load_model(), true_rul, intervals)
+        try:
+            anomaly = load_anomaly_model()
+        except AnomalyNotAvailableError:
+            anomaly = None
+        sidecar[args.out.name] = expected_prediction(
+            payload, load_model(), true_rul, intervals, anomaly
+        )
         args.expected.write_text(json.dumps(sidecar, indent=2) + "\n", encoding="utf-8")
     return 0
 

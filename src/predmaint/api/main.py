@@ -15,6 +15,7 @@ from fastapi import Body, FastAPI, Request, Response
 from predmaint import __version__
 from predmaint.api.errors import error_response, install_error_handlers
 from predmaint.api.schemas import (
+    AnomalyResponse,
     ErrorResponse,
     HealthResponse,
     ModelInfoResponse,
@@ -40,7 +41,7 @@ envelope `{"error": {"code", "message", "details"}}`.
 
 _ERRORS = {
     422: {"model": ErrorResponse, "description": "Validation or input-contract error"},
-    503: {"model": ErrorResponse, "description": "No model loaded (MODEL_UNAVAILABLE)"},
+    503: {"model": ErrorResponse, "description": "MODEL_UNAVAILABLE or ANOMALY_UNAVAILABLE"},
     500: {"model": ErrorResponse, "description": "Unexpected server error"},
 }
 
@@ -114,6 +115,7 @@ def create_app(model_path: Path | None = None) -> FastAPI:
             model_version=model.model_version if model else None,
             api_version=__version__,
             intervals_loaded=service.intervals is not None,
+            anomaly_loaded=service.anomaly is not None,
         )
 
     @app.post("/predict", response_model=PredictResponse, responses=_ERRORS, tags=["prediction"])
@@ -121,6 +123,15 @@ def create_app(model_path: Path | None = None) -> FastAPI:
         """Predict RUL at the last cycle from the last 30 consecutive cycles of one engine."""
         service: ModelService = request.app.state.service
         return service.predict(payload)
+
+    @app.post("/anomaly", response_model=AnomalyResponse, responses=_ERRORS, tags=["anomaly"])
+    def anomaly(
+        request: Request, payload: Annotated[PredictRequest, body], include_series: bool = False
+    ) -> AnomalyResponse:
+        """Anomaly score (distance to the healthy reference, ADR-035) at the last cycle; with
+        `include_series=true`, the normalised score for every full-window cycle."""
+        service: ModelService = request.app.state.service
+        return service.score(payload, include_series)
 
     @app.get(
         "/model/info",

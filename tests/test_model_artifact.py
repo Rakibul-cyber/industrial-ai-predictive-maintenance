@@ -10,11 +10,14 @@ import pytest
 import sklearn
 
 from predmaint.models.predict import (
+    anomaly_mismatch,
     clear_model_cache,
     interval_mismatch,
+    load_anomaly_model,
     load_interval_model,
     load_model,
     predict_rul,
+    score_anomaly,
 )
 from predmaint.models.registry import pipeline_feature_names
 
@@ -23,6 +26,8 @@ MODEL = ROOT / "models" / "model.joblib"
 METADATA = ROOT / "models" / "model_metadata.json"
 INTERVALS = ROOT / "models" / "model_intervals.joblib"
 INTERVALS_METADATA = ROOT / "models" / "model_intervals_metadata.json"
+ANOMALY = ROOT / "models" / "model_anomaly.joblib"
+ANOMALY_METADATA = ROOT / "models" / "model_anomaly_metadata.json"
 EXAMPLES = ROOT / "examples"
 
 
@@ -73,3 +78,27 @@ def test_committed_interval_artifact_matches_served_model() -> None:
     model, intervals = load_model(MODEL), load_interval_model(INTERVALS)
     assert interval_mismatch(intervals, model) is None
     assert intervals.metadata["library_versions"]["scikit-learn"] == sklearn.__version__
+
+
+def test_committed_anomaly_artifact_matches_served_model() -> None:
+    """ADR-035: the committed anomaly detector belongs to the committed point model."""
+    assert ANOMALY.is_file() and ANOMALY_METADATA.is_file()
+    clear_model_cache()
+    model, detector = load_model(MODEL), load_anomaly_model(ANOMALY)
+    assert anomaly_mismatch(detector, model) is None
+    assert detector.metadata == json.loads(ANOMALY_METADATA.read_text())
+    assert detector.threshold == detector.metadata["threshold"]
+    assert detector.metadata["library_versions"]["scikit-learn"] == sklearn.__version__
+
+
+@pytest.mark.parametrize("example", sorted(p.name for p in EXAMPLES.glob("predict_request*.json")))
+def test_committed_anomaly_reproduces_sidecar(example: str) -> None:
+    clear_model_cache()
+    expected = json.loads((EXAMPLES / "expected_predictions.json").read_text())[example]["anomaly"]
+    payload = json.loads((EXAMPLES / example).read_text())
+    result = score_anomaly(payload["records"], load_model(MODEL), load_anomaly_model(ANOMALY))
+    assert round(result.anomaly_score, 4) == expected["anomaly_score"]
+    assert round(result.normalized_score, 4) == expected["normalized_score"]
+    assert round(result.threshold, 4) == expected["threshold"]
+    assert result.is_anomalous is expected["is_anomalous"]
+    assert result.model_version == expected["model_version"]

@@ -121,6 +121,7 @@ def served_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
     The returned directory holds ``models/`` (incl. ``model.joblib``) and ``CMAPSSData/``.
     """
+    from predmaint.models.anomaly import run_anomaly_training
     from predmaint.models.intervals import run_interval_training
     from predmaint.models.train import run_training
 
@@ -155,6 +156,17 @@ def served_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
         root / "reports",
         verify_checksums=False,
         expected=None,
+        echo=lambda _msg: None,
+    )
+    # Synthetic engines live 50-75 cycles, so no row reaches true RUL >= 125: lower the
+    # healthy-reference bound for the fixture only (ADR-035 uses RUL_CAP on real data).
+    run_anomaly_training(
+        data_dir,
+        root / "models",
+        root / "reports",
+        verify_checksums=False,
+        expected=None,
+        healthy_min_rul=20,
         echo=lambda _msg: None,
     )
     return root

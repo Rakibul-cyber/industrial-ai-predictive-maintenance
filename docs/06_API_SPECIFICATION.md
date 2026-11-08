@@ -2,7 +2,7 @@
 
 FastAPI app built by `predmaint.api.main:create_app()` (module-level `app` for uvicorn). Run it with `python -m predmaint.api.main`, which binds `$API_HOST:$API_PORT` (default `127.0.0.1:8000`), or with `uvicorn predmaint.api.main:app --host … --port …`. The served model is loaded once at startup from `$MODEL_PATH` (default `$MODEL_DIR/model.joblib`; env vars in [10](10_DEPLOYMENT_PLAN.md) §3). JSON only. No authentication, CORS or rate limiting (local MVP; ADR-012). Interactive docs at `/docs` (title, version from the package, description, and a real example request when the server runs from the repo root).
 
-All bodies below were copied from `curl` / TestClient output against the served model `primary-20261108-f4c86df` on 2026-11-08 (Milestone 4; interval fields and `api_version` 0.2.0 from Milestone 8).
+All bodies below were copied from `curl` / TestClient output against the served model `primary-20261108-f4c86df` on 2026-11-08 (Milestone 4; interval fields from Milestone 8; `/anomaly`, `anomaly_loaded`, `/model/info.anomaly` and `api_version` 0.3.0 from Milestone 9).
 
 ## 1. Endpoints
 
@@ -10,9 +10,12 @@ All bodies below were copied from `curl` / TestClient output against the served 
 |---|---|---|---|---|
 | GET | `/health` | Liveness + model readiness | 200 (also without a model, ADR-028) | — |
 | POST | `/predict` | RUL prediction for one engine | 200 | 422 (4 codes), 503, 500 |
+| POST | `/anomaly` | Anomaly score for one engine (M9, ADR-035); `?include_series=true` adds the per-cycle series | 200 | 422 (same codes as `/predict`), 503 `ANOMALY_UNAVAILABLE`, 500 |
 | GET | `/model/info` | Served model metadata and metrics | 200 | 503 `MODEL_UNAVAILABLE` |
 
 **Interval artifact (ADR-034):** loaded at startup from `model_intervals.joblib` next to `MODEL_PATH`. If it is absent, unloadable or built for a different `model_version`, the API logs a WARNING and serves point predictions with `rul_lower`/`rul_upper`/`interval_level` = `null`; nothing else changes.
+
+**Anomaly artifact (ADR-035):** loaded at startup from `model_anomaly.joblib` next to `MODEL_PATH`. If it is absent, unloadable, built for a different `model_version` or uses features the served model does not produce, the API logs a WARNING, `/health.anomaly_loaded` is `false`, `/model/info.anomaly` is `null` and `/anomaly` returns 503 `ANOMALY_UNAVAILABLE`; `/predict` is unaffected.
 
 **No-artifact rule (ADR-022 as amended by ADR-028):** if the model cannot be loaded at startup, the API still starts and logs a WARNING. `/health` returns **200** with `"model_loaded": false`; `/predict` and `/model/info` return **503** `MODEL_UNAVAILABLE` in the standard error body (§6).
 
@@ -21,13 +24,13 @@ All bodies below were copied from `curl` / TestClient output against the served 
 With a model (200):
 
 ```json
-{"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.2.0","intervals_loaded":true}
+{"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.3.0","intervals_loaded":true,"anomaly_loaded":true}
 ```
 
 Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 
 ```json
-{"status":"degraded","model_loaded":false,"model_version":null,"api_version":"0.2.0","intervals_loaded":false}
+{"status":"degraded","model_loaded":false,"model_version":null,"api_version":"0.3.0","intervals_loaded":false,"anomaly_loaded":false}
 ```
 
 | Field | Type | Rule |
@@ -35,8 +38,9 @@ Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 | `status` | `"ok" \| "degraded"` | `degraded` when no model is loaded. |
 | `model_loaded` | bool | Whether `/predict` can serve. Readiness probes (M6 compose healthcheck) must check this field, not only the status code. |
 | `model_version` | string \| null | Served model version; `null` without a model. |
-| `api_version` | string | `predmaint.__version__` (0.2.0 since M8). |
+| `api_version` | string | `predmaint.__version__` (0.2.0 since M8, 0.3.0 since M9). |
 | `intervals_loaded` | bool | Whether a prediction-interval artifact matching the served model is loaded (ADR-034). |
+| `anomaly_loaded` | bool | Whether an anomaly detector matching the served model is loaded (ADR-035). Not part of the readiness check. |
 
 ## 3. `POST /predict`
 
@@ -128,7 +132,9 @@ The same call with `examples/predict_request.json` (31 records) returns the iden
  "sklearn_version_match": true,
  "intervals": {"for_model_version": "primary-20261108-f4c86df", "method": "HistGradientBoostingRegressor(loss='quantile') at q=0.1 and q=0.9 (ADR-034)", "quantiles": [0.1, 0.9], "interval_level": 0.8, "trained_at": "2026-11-08T18:55:47Z",
    "cv_oof": {"n": 17731, "coverage_unclipped": 0.5087699509333935, "coverage_clipped": 0.7370706671930517, "mean_width": 37.196710409508896, "median_width": 36.658377404963076, "n_reordered": 1023},
-   "test": {"n": 100, "coverage_unclipped": 0.74, "coverage_clipped": 0.82, "mean_width": 42.12697130358668, "median_width": 41.95713193422868, "n_reordered": 8}}
+   "test": {"n": 100, "coverage_unclipped": 0.74, "coverage_clipped": 0.82, "mean_width": 42.12697130358668, "median_width": 41.95713193422868, "n_reordered": 8}},
+ "anomaly": {"model_version": "anomaly-20261108-a25df0e", "for_model_version": "primary-20261108-f4c86df", "method": "mahalanobis_ledoitwolf", "threshold": 5.40363364967852, "threshold_quantile": 0.99, "healthy_rows": 5329, "trained_at": "2026-11-08T19:33:06Z",
+   "trend_median_train_oof": 0.6798250694250569, "false_alarm_rate_healthy": 0.010133233252017265, "detection_fraction_of_life_median": 0.7581860706860707, "detection_true_rul_median": 49.0, "never_flagged_fraction": 0.02, "acceptance_met": false}
 }
 ```
 
@@ -138,7 +144,38 @@ All fields come from `model_metadata.json` (05 §9), except `n_features` (= `len
 
 ### 4.3 Required fields (FR-012)
 
-`model_name, model_version, trained_at, git_sha, selected_by, data_subset, train_sha256, window_size, rul_cap, n_features, required_sensors, feature_names, health_bands, metrics, sklearn_version_match`, plus `intervals` (object or `null`, ADR-034).
+`model_name, model_version, trained_at, git_sha, selected_by, data_subset, train_sha256, window_size, rul_cap, n_features, required_sensors, feature_names, health_bands, metrics, sklearn_version_match`, plus `intervals` (object or `null`, ADR-034) and `anomaly` (object or `null`, ADR-035; fields from `model_anomaly_metadata.json`: version, method, OOF threshold, healthy-row count and the headline train-OOF evaluation incl. `acceptance_met`).
+
+## 4a. `POST /anomaly` (M9, ADR-035)
+
+**Request:** identical to `POST /predict` (§3.1–3.3): same Pydantic schema and the same business validation function, so every 422 body is identical to `/predict`'s for the same input (tested). Query parameter `include_series` (bool, default `false`; an unparseable value → 422 `VALIDATION_ERROR`).
+
+**Response 200** — real bodies from the M9 local API (`examples/predict_request.json`, test engine 1; `examples/predict_request_late.json`, test engine 34):
+
+```json
+{"unit_id":"test-unit-1","last_cycle":31,"anomaly_score":3.5973,"normalized_score":0.6657,"threshold":5.4036,"is_anomalous":false,"model_version":"anomaly-20261108-a25df0e","series":null}
+{"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-a25df0e","series":null}
+```
+
+With `?include_series=true` (engine 34; 174 = 203 − 30 + 1 entries, first and last three shown):
+
+```json
+{"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-a25df0e",
+ "series":[{"cycle":30,"normalized_score":0.8445},{"cycle":31,"normalized_score":0.8533},{"cycle":32,"normalized_score":0.8337}, …, {"cycle":201,"normalized_score":1.1271},{"cycle":202,"normalized_score":1.1481},{"cycle":203,"normalized_score":1.1015}]}
+```
+
+| Field | Type | Rule |
+|---|---|---|
+| `unit_id` | string \| null | Echoed from the request. |
+| `last_cycle` | int | Last cycle of the request. |
+| `anomaly_score` | float | Mahalanobis distance of the last full-window row to the healthy reference (4 decimals). Depends only on the last 30 records. |
+| `normalized_score` | float | `anomaly_score / threshold` (4 decimals); > 1 means anomalous. |
+| `threshold` | float | 99th percentile of out-of-fold healthy-row scores (4 decimals). |
+| `is_anomalous` | bool | `normalized_score > 1` (computed before rounding). |
+| `model_version` | string | Anomaly detector version (`anomaly-YYYYMMDD-<sha7>`). |
+| `series` | list \| null | Only with `include_series=true`: `{cycle, normalized_score}` for every cycle with a full trailing window (`cycles_received − 30 + 1` entries, last entry = `normalized_score`). |
+
+The score is an unsupervised health indicator, not a validated fault detector; its trend target was not met (16 §10).
 
 ## 5. Status codes
 
@@ -148,7 +185,7 @@ All fields come from `model_metadata.json` (05 §9), except `n_features` (= `len
 | 404 | Unknown path (`NOT_FOUND`) |
 | 405 | Wrong method (`METHOD_NOT_ALLOWED`) |
 | 422 | Schema or business validation failure |
-| 503 | `/predict` or `/model/info` without a loaded model |
+| 503 | `/predict` or `/model/info` without a loaded model; `/anomaly` without a loaded, matching detector |
 | 500 | Unhandled server error |
 
 ## 6. Error envelope
@@ -168,6 +205,7 @@ Exception classes come from the inference contract (`predmaint.models.predict`, 
 | `MISSING_SENSORS` | 422 | `MissingColumnsError` | `"required columns missing or null: s_7"`, `[{"sensor":"s_7"}]` |
 | `NON_CONSECUTIVE_CYCLES` | 422 | `NonConsecutiveCyclesError` | `"cycles must be strictly increasing by exactly 1 in the order given"`, `[]` |
 | `MODEL_UNAVAILABLE` | 503 | `ModelNotAvailableError` (no model loaded) | `"No model loaded from /nonexistent: artifact not found: /nonexistent/model.joblib (run \`python scripts/train.py\`)"`, `[]` |
+| `ANOMALY_UNAVAILABLE` | 503 | `AnomalyNotAvailableError` (`/anomaly` only: no point model, or no matching detector) | `"No anomaly detector loaded: no point model loaded"`, `[]`; with the detector files removed: `"No anomaly detector loaded: artifact not found: <dir>/model_anomaly.joblib (run \`python scripts/train.py\`)"` |
 | `NOT_FOUND` / `METHOD_NOT_ALLOWED` | 404 / 405 | Starlette HTTP exceptions | `"Not Found"` / `"Method Not Allowed"`, `[]` |
 | `HTTP_ERROR` | any other 4xx/5xx raised as a Starlette `HTTPException` | fallback in `predmaint.api.errors` (no route raises one today) | the exception's detail, `[]` |
 | `INTERNAL_ERROR` | 500 | Any other exception | `"Internal server error"`, `[]`. No traceback in the body; the full traceback is logged. |
@@ -184,6 +222,8 @@ curl -s localhost:8000/health
 curl -s localhost:8000/model/info
 curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request.json
 curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request_min.json
+curl -s -X POST localhost:8000/anomaly -H "Content-Type: application/json" -d @examples/predict_request_late.json
+curl -s -X POST "localhost:8000/anomaly?include_series=true" -H "Content-Type: application/json" -d @examples/predict_request_late.json
 python scripts/make_request_payload.py --unit 1 --last 10 > /tmp/short.json   # → 422 INSUFFICIENT_CYCLES
 curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @/tmp/short.json
 ```

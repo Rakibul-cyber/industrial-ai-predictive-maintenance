@@ -104,6 +104,7 @@ class HealthResponse(BaseModel):
     model_version: str | None
     api_version: str
     intervals_loaded: bool
+    anomaly_loaded: bool
 
 
 class CvMetrics(BaseModel):
@@ -153,6 +154,61 @@ class IntervalsInfo(BaseModel):
     test: IntervalCoverage
 
 
+class AnomalySeriesPoint(BaseModel):
+    cycle: int
+    normalized_score: float
+
+
+class AnomalyResponse(BaseModel):
+    """Anomaly score at the last cycle (ADR-035); ``series`` only with ``include_series=true``."""
+
+    model_config = ConfigDict(
+        protected_namespaces=(),
+        json_schema_extra={
+            "examples": [
+                {
+                    "unit_id": "test-unit-34",
+                    "last_cycle": 203,
+                    "anomaly_score": 5.9519,
+                    "normalized_score": 1.1015,
+                    "threshold": 5.4036,
+                    "is_anomalous": True,
+                    "model_version": "anomaly-20261108-a25df0e",
+                }
+            ]
+        },
+    )
+
+    unit_id: str | None
+    last_cycle: int
+    anomaly_score: float = Field(description="Mahalanobis distance to the healthy reference.")
+    normalized_score: float = Field(description="anomaly_score / threshold; > 1 is anomalous.")
+    threshold: float
+    is_anomalous: bool
+    model_version: str
+    series: list[AnomalySeriesPoint] | None = None
+
+
+class AnomalyInfo(BaseModel):
+    """Anomaly-detector summary (ADR-035)."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_version: str
+    for_model_version: str
+    method: str
+    threshold: float
+    threshold_quantile: float
+    healthy_rows: int
+    trained_at: str
+    trend_median_train_oof: float | None
+    false_alarm_rate_healthy: float
+    detection_fraction_of_life_median: float | None
+    detection_true_rul_median: float | None
+    never_flagged_fraction: float
+    acceptance_met: bool
+
+
 class ModelInfoResponse(BaseModel):
     """Served model identity, provenance and metrics, from ``model_metadata.json``."""
 
@@ -174,6 +230,7 @@ class ModelInfoResponse(BaseModel):
     metrics: ModelMetrics
     sklearn_version_match: bool
     intervals: IntervalsInfo | None = None
+    anomaly: AnomalyInfo | None = None
 
 
 class ErrorBody(BaseModel):

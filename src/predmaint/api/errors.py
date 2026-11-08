@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from predmaint.models.predict import (
+    AnomalyNotAvailableError,
     InputContractError,
     InsufficientHistoryError,
     InvalidValuesError,
@@ -26,6 +27,7 @@ CONTRACT_ERRORS: tuple[tuple[type[Exception], int, str], ...] = (
     (NonConsecutiveCyclesError, 422, "NON_CONSECUTIVE_CYCLES"),
     (InvalidValuesError, 422, "VALIDATION_ERROR"),
     (ModelNotAvailableError, 503, "MODEL_UNAVAILABLE"),
+    (AnomalyNotAvailableError, 503, "ANOMALY_UNAVAILABLE"),
 )
 _HTTP_CODES = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED"}
 
@@ -69,5 +71,6 @@ def install_error_handlers(app: FastAPI) -> None:
     """
     app.add_exception_handler(InputContractError, _contract_error)
     app.add_exception_handler(ModelNotAvailableError, _contract_error)
+    app.add_exception_handler(AnomalyNotAvailableError, _contract_error)
     app.add_exception_handler(RequestValidationError, _validation_error)  # type: ignore[arg-type]
     app.add_exception_handler(StarletteHTTPException, _http_error)  # type: ignore[arg-type]

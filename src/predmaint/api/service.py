@@ -12,6 +12,8 @@ import pandas as pd
 import sklearn
 
 from predmaint.api.schemas import (
+    AnomalyInfo,
+    AnomalyResponse,
     IntervalsInfo,
     ModelInfoResponse,
     PredictRequest,
@@ -19,14 +21,20 @@ from predmaint.api.schemas import (
 )
 from predmaint.data.load import SENSOR_COLUMNS, SETTING_COLUMNS
 from predmaint.models.predict import (
+    AnomalyModel,
+    AnomalyNotAvailableError,
     IntervalModel,
     LoadedModel,
     ModelNotAvailableError,
+    anomaly_mismatch,
+    anomaly_path_for,
     interval_mismatch,
     interval_path_for,
+    load_anomaly_model,
     load_interval_model,
     load_model,
     predict_rul,
+    score_anomaly,
 )
 
 logger = logging.getLogger("predmaint.api")
@@ -40,6 +48,8 @@ class ModelService:
         self.model: LoadedModel | None = None
         self.load_error: str | None = None
         self.intervals: IntervalModel | None = None
+        self.anomaly: AnomalyModel | None = None
+        self.anomaly_error: str | None = "no point model loaded"
 
     def load(self) -> None:
         """Load the model once; on failure keep running in degraded mode (ADR-022/028)."""
@@ -51,6 +61,47 @@ class ModelService:
             return
         logger.info("Loaded model %s from %s", self.model.model_version, self.model_path)
         self._load_intervals(self.model)
+        self._load_anomaly(self.model)
+
+    def _load_anomaly(self, model: LoadedModel) -> None:
+        """Load the matching anomaly detector; otherwise warn and leave /anomaly unavailable."""
+        path = anomaly_path_for(self.model_path)
+        try:
+            anomaly = load_anomaly_model(path)
+        except AnomalyNotAvailableError as exc:
+            self.anomaly_error = str(exc)
+            logger.warning("Anomaly detector not available: %s", exc)
+            return
+        reason = anomaly_mismatch(anomaly, model)
+        if reason is not None:
+            self.anomaly_error = reason
+            logger.warning("Anomaly detector ignored: %s", reason)
+            return
+        self.anomaly, self.anomaly_error = anomaly, None
+        logger.info("Loaded anomaly detector %s from %s", anomaly.model_version, path)
+
+    def score(self, request: PredictRequest, include_series: bool) -> AnomalyResponse:
+        """Run ``score_anomaly`` on the request (same validation as ``predict``)."""
+        if self.anomaly is None or self.model is None:
+            raise AnomalyNotAvailableError(f"No anomaly detector loaded: {self.anomaly_error}")
+        records = [record.model_dump() for record in request.records]
+        result = score_anomaly(records, self.model, self.anomaly, include_series)
+        series = None
+        if result.series is not None:
+            series = [
+                {"cycle": p["cycle"], "normalized_score": round(p["normalized_score"], 4)}
+                for p in result.series
+            ]
+        return AnomalyResponse(
+            unit_id=request.unit_id,
+            last_cycle=result.last_cycle,
+            anomaly_score=round(result.anomaly_score, 4),
+            normalized_score=round(result.normalized_score, 4),
+            threshold=round(result.threshold, 4),
+            is_anomalous=result.is_anomalous,
+            model_version=result.model_version,
+            series=series,
+        )
 
     def _load_intervals(self, model: LoadedModel) -> None:
         """Load the matching interval artifact; otherwise warn and serve point predictions only."""
@@ -119,6 +170,28 @@ class ModelService:
             },
             sklearn_version_match=meta["library_versions"]["scikit-learn"] == sklearn.__version__,
             intervals=self._intervals_info(),
+            anomaly=self._anomaly_info(),
+        )
+
+    def _anomaly_info(self) -> AnomalyInfo | None:
+        if self.anomaly is None:
+            return None
+        meta = self.anomaly.metadata
+        train = meta["evaluation"]["train_oof"]
+        return AnomalyInfo(
+            model_version=meta["model_version"],
+            for_model_version=meta["for_model_version"],
+            method=meta["method"],
+            threshold=meta["threshold"],
+            threshold_quantile=meta["threshold_quantile"],
+            healthy_rows=meta["healthy_rows"],
+            trained_at=meta["trained_at"],
+            trend_median_train_oof=train["trend"]["median"],
+            false_alarm_rate_healthy=train["false_alarm_rate_healthy"],
+            detection_fraction_of_life_median=train["detection"]["fraction_of_life"]["median"],
+            detection_true_rul_median=train["detection"]["true_rul_at_detection"]["median"],
+            never_flagged_fraction=train["detection"]["never_flagged_fraction"],
+            acceptance_met=meta["evaluation"]["acceptance"]["met"],
         )
 
     def _intervals_info(self) -> IntervalsInfo | None:
@@ -153,9 +226,11 @@ def expected_prediction(
     model: LoadedModel,
     true_rul: int | None = None,
     intervals: IntervalModel | None = None,
+    anomaly: AnomalyModel | None = None,
 ) -> dict[str, Any]:
-    """Offline reference for a demo payload: what ``POST /predict`` must return for it."""
+    """Offline reference for a demo payload: what ``POST /predict`` (and ``/anomaly``) return."""
     result = predict_rul(payload["records"], model, intervals)
+    scored = None if anomaly is None else score_anomaly(payload["records"], model, anomaly)
     return {
         "unit_id": payload["unit_id"],
         "cycles_received": result.cycles_received,
@@ -167,4 +242,13 @@ def expected_prediction(
         "rul_upper": None if result.rul_upper is None else round(result.rul_upper, 2),
         "interval_level": result.interval_level,
         "true_rul_at_last_cycle": true_rul,
+        "anomaly": None
+        if scored is None
+        else {
+            "anomaly_score": round(scored.anomaly_score, 4),
+            "normalized_score": round(scored.normalized_score, 4),
+            "threshold": round(scored.threshold, 4),
+            "is_anomalous": scored.is_anomalous,
+            "model_version": scored.model_version,
+        },
     }

@@ -38,6 +38,7 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-032 | One image (single stage, digest-pinned, model baked in), two compose services | Accepted (2026-11-08, user-directed) |
 | ADR-033 | Project renamed "Industrial AI — Predictive Maintenance Platform"; anomaly detection stays an unauthorized extension | Accepted (2026-11-08, user-directed, CR-007) |
 | ADR-034 | Prediction intervals: two quantile HGB models (q0.1/q0.9), separate artifact, graceful fallback | Accepted (2026-11-08, user-directed, CR-008) |
+| ADR-035 | Minimal anomaly detection: Mahalanobis distance to a healthy reference, OOF threshold | Accepted (2026-11-08, user-directed, CR-010) |
 
 ---
 
@@ -299,3 +300,24 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
   - Quantile models are trained on capped labels and bounds are clamped at 125, so engines whose true RUL exceeds 125 cannot be covered against unclipped truth; this is expected and reported, not fixed.
   - Quantile crossing is possible and is handled by the ordering rule.
   - Retraining order: train/select the point model first, then `--model intervals`; commit the four model files together.
+
+### ADR-035 — Minimal anomaly detection: Mahalanobis distance to a healthy reference (Milestone 9)
+
+- **Context:** CR-010. C-MAPSS has no anomaly labels, so anomaly detection is framed as unsupervised health monitoring: an "anomaly" is a deviation from a healthy-state reference, and the method is judged by whether its score tracks degradation.
+- **Decision:**
+  - **Healthy reference:** training rows that pass the `WINDOW_SIZE` filter and have true (uncapped) RUL ≥ `RUL_CAP` (125). That is the part of each engine's life where the point model's target is flat at the cap. **Correction (M9 measurement, 2026-11-08):** an engine contributes only if its life is ≥ 155 cycles (cycle ≥ 30 and RUL ≥ 125); the measured reference is 5,329 rows from **90 of 100** engines, not every engine as first written.
+  - **Features:** the 14 kept sensors' `*_roll_mean` columns from the shared feature function; no new features.
+  - **Model:** `StandardScaler` → `sklearn.covariance.LedoitWolf`, both fitted on healthy rows; score = Mahalanobis distance.
+  - **Threshold:** 99th percentile of healthy-row scores computed out-of-fold (5-fold GroupKFold by engine), so it is not fitted on the rows it is evaluated on. `normalized_score = score / threshold`; `is_anomalous = normalized_score > 1`.
+  - **Fallback (at most once):** if the median per-engine Spearman(score, cycle) on train OOF is below 0.5, try `IsolationForest` (default parameters) on the same features and keep the better one on that metric, recording both.
+  - **Artifact:** `models/model_anomaly.joblib` (scaler, covariance, feature list, threshold) + metadata (`for_model_version` of the served point model, healthy-row count, threshold, evaluation). Committed, baked into the image, loaded at startup; absent or mismatched → warning and 503 `ANOMALY_UNAVAILABLE` on `/anomaly` only.
+  - **API (additive):** `POST /anomaly` (same request schema and validation as `/predict`, optional `?include_series=true`); `/health.anomaly_loaded`; `/model/info.anomaly`; `api_version` 0.3.0.
+- **Alternatives:**
+  - Healthy reference = first N cycles of each engine: calendar age, not degradation. Engines start with different initial wear, so a fixed N mixes healthy and early-degraded states unevenly; the RUL ≥ cap definition aligns the reference with where the RUL target itself is flat.
+  - Autoencoders or deep models: excluded by scope.
+  - One-class SVM: extra tuning, no clear benefit for 14 features.
+- **Rationale:** a transparent, few-parameter, dependency-free baseline that reuses the shared feature path; Ledoit-Wolf shrinkage keeps the covariance well conditioned.
+- **Evaluation / acceptance (FR-019):** trend (median per-engine Spearman > 0.7 on train OOF), false-alarm rate on healthy rows, detection timing (3 consecutive cycles above threshold), test flags by true-RUL bucket, agreement with the RUL model. Not tuned toward the target.
+- **Consequences:** the score measures distance from a population-level healthy state, not engine-specific baselines; without labels the evaluation shows the score tracks simulated degradation, not that it detects real faults.
+- **Outcome (M9, 2026-11-08):** fallback not triggered (median 0.680 ≥ 0.5); FR-019 trend target not met (0.680 ≤ 0.7). Per the M9 authorization the project title stays as is and no follow-up ADR (title restoration) was added.
+

@@ -1,5 +1,7 @@
 """Thin HTTP client for the RUL API (docs/06). Never raises: every call returns an ApiResult.
 
+Wraps ``/health``, ``/model/info``, ``/predict`` and ``/anomaly`` (M9).
+
 Success bodies and the docs/06 error envelope are passed through unchanged. Network failures
 (connection refused, timeout, …) become a client-side envelope with code ``API_UNREACHABLE``.
 """
@@ -58,6 +60,10 @@ class ApiClient:
 
     def predict(self, payload: dict[str, Any]) -> ApiResult:
         return self._call("POST", "/predict", payload)
+
+    def anomaly(self, payload: dict[str, Any], include_series: bool = False) -> ApiResult:
+        path = "/anomaly?include_series=true" if include_series else "/anomaly"
+        return self._call("POST", path, payload)
 
     def _call(self, method: str, path: str, payload: dict[str, Any] | None = None) -> ApiResult:
         url = f"{self.base_url}{path}"

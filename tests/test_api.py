@@ -18,11 +18,14 @@ from predmaint.api.service import request_payload
 from predmaint.data.load import load_fd001
 from predmaint.models.predict import (
     InvalidValuesError,
+    anomaly_path_for,
     clear_model_cache,
     interval_path_for,
+    load_anomaly_model,
     load_interval_model,
     load_model,
     predict_rul,
+    score_anomaly,
 )
 
 
@@ -80,6 +83,7 @@ def test_health_without_model_is_200_degraded(no_model_client: TestClient) -> No
         "model_version": None,
         "api_version": __version__,
         "intervals_loaded": False,
+        "anomaly_loaded": False,
     }
 
 
@@ -367,3 +371,122 @@ def test_intervals_unavailable_serves_point_only(
     assert body["predicted_rul"] == with_intervals["predicted_rul"]  # point unchanged
     assert info["intervals"] is None
     assert any("Prediction intervals" in r.getMessage() for r in caplog.records)
+
+
+# --- /anomaly (ADR-035) ---------------------------------------------------------------------
+def test_anomaly_matches_score_anomaly(
+    client: TestClient, payload: dict[str, Any], model_path: Path
+) -> None:
+    response = client.post("/anomaly", json=payload)
+    assert response.status_code == 200, response.text
+    direct = score_anomaly(
+        payload["records"], load_model(model_path), load_anomaly_model(anomaly_path_for(model_path))
+    )
+    assert response.json() == {
+        "unit_id": "engine-2",
+        "last_cycle": 40,
+        "anomaly_score": round(direct.anomaly_score, 4),
+        "normalized_score": round(direct.normalized_score, 4),
+        "threshold": round(direct.threshold, 4),
+        "is_anomalous": direct.is_anomalous,
+        "model_version": direct.model_version,
+        "series": None,
+    }
+
+
+def test_anomaly_series(client: TestClient, payload: dict[str, Any]) -> None:
+    body = client.post("/anomaly?include_series=true", json=payload).json()
+    series = body["series"]
+    assert len(series) == 40 - 30 + 1
+    assert [p["cycle"] for p in series] == list(range(30, 41))
+    assert series[-1]["normalized_score"] == body["normalized_score"]
+    assert client.post("/anomaly?include_series=false", json=payload).json()["series"] is None
+
+
+@pytest.mark.parametrize("case", ["short", "missing", "gap", "bad body", "bad query"])
+def test_anomaly_validation_errors_identical_to_predict(
+    client: TestClient, payload: dict[str, Any], model_path: Path, case: str
+) -> None:
+    records = [dict(r) for r in payload["records"]]
+    body: dict[str, Any] = {"records": records}
+    query = ""
+    if case == "short":
+        body["records"] = records[:10]
+    elif case == "missing":
+        records[5][load_model(model_path).required_sensors[0]] = None
+    elif case == "gap":
+        for record in records[10:]:
+            record["cycle"] += 1
+    elif case == "bad body":
+        body["extra"] = 1
+    else:
+        query = "?include_series=maybe"
+    anomaly = client.post(f"/anomaly{query}", json=body)
+    if case == "bad query":
+        _assert_envelope(anomaly, 422, "VALIDATION_ERROR")
+        return
+    predict = client.post("/predict", json=body)
+    assert anomaly.status_code == predict.status_code == 422
+    assert anomaly.json() == predict.json()
+
+
+def test_anomaly_503_without_model(no_model_client: TestClient, payload: dict[str, Any]) -> None:
+    error = _assert_envelope(
+        no_model_client.post("/anomaly", json=payload), 503, "ANOMALY_UNAVAILABLE"
+    )
+    assert "no point model loaded" in error["message"]
+
+
+def test_health_and_info_report_anomaly(client: TestClient) -> None:
+    health = client.get("/health").json()
+    assert health["anomaly_loaded"] is True
+    info = client.get("/model/info").json()["anomaly"]
+    assert info["for_model_version"] == health["model_version"]
+    assert info["method"] == "mahalanobis_ledoitwolf" and info["threshold_quantile"] == 0.99
+    assert info["threshold"] > 0 and info["healthy_rows"] > 0
+    assert 0 <= info["false_alarm_rate_healthy"] <= 1
+    assert isinstance(info["acceptance_met"], bool)
+    assert info["model_version"].startswith("anomaly-")
+
+
+def _client_with_anomaly_variant(
+    served_model_dir: Path, tmp_path: Path, variant: str
+) -> TestClient:
+    models = tmp_path / "models"
+    shutil.copytree(served_model_dir / "models", models)
+    meta_path = models / "model_anomaly_metadata.json"
+    if variant == "absent":
+        (models / "model_anomaly.joblib").unlink()
+        meta_path.unlink()
+    else:
+        meta = json.loads(meta_path.read_text())
+        meta_path.write_text(json.dumps({**meta, "for_model_version": "primary-19990101-0000000"}))
+    clear_model_cache()
+    return TestClient(create_app(model_path=models / "model.joblib"))
+
+
+@pytest.mark.parametrize("variant", ["absent", "mismatch"])
+def test_anomaly_unavailable_keeps_predict_working(
+    served_model_dir: Path,
+    tmp_path: Path,
+    client: TestClient,
+    payload: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+    variant: str,
+) -> None:
+    reference = client.post("/predict", json=payload).json()
+    with (
+        caplog.at_level(logging.WARNING, logger="predmaint.api"),
+        _client_with_anomaly_variant(served_model_dir, tmp_path, variant) as other,
+    ):
+        health = other.get("/health").json()
+        predicted = other.post("/predict", json=payload).json()
+        info = other.get("/model/info").json()
+        error = _assert_envelope(other.post("/anomaly", json=payload), 503, "ANOMALY_UNAVAILABLE")
+    assert health["model_loaded"] is True and health["anomaly_loaded"] is False
+    assert health["status"] == "ok"
+    assert predicted == reference  # point and interval output unchanged
+    assert info["anomaly"] is None
+    assert any("Anomaly detector" in r.getMessage() for r in caplog.records)
+    if variant == "mismatch":
+        assert "19990101" in error["message"]

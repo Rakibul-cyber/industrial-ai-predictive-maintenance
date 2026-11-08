@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Docker smoke test (docs/09, M6/M8): build the image, start compose, wait for both healthchecks,
-# check /health (model + intervals loaded), POST the late-life example and assert its recorded
-# critical result and rul_lower <= predicted_rul <= rul_upper (ADR-034), check the
-# dashboard health endpoint, tear down. Exits non-zero on any failure.
+# Docker smoke test (docs/09, M6/M8/M9): build the image, start compose, wait for both
+# healthchecks, check /health (model + intervals + anomaly loaded), POST the late-life example and
+# assert its recorded critical result and rul_lower <= predicted_rul <= rul_upper (ADR-034),
+# POST both examples to /anomaly and assert the late one is anomalous and scores above engine 1
+# (ADR-035), check the dashboard health endpoint, tear down. Exits non-zero on any failure.
 #
 # Usage: bash scripts/smoke_test.sh   (needs docker compose, curl, python3)
 # Runs on its own host ports (default 18000/18501), so a running demo stack is not disturbed.
@@ -52,6 +53,8 @@ python3 -c 'import json,sys; b=json.loads(sys.argv[1]); assert b["model_loaded"]
   || fail "/health does not report model_loaded=true"
 python3 -c 'import json,sys; b=json.loads(sys.argv[1]); assert b["intervals_loaded"] is True, b' \
   "$health" || fail "/health does not report intervals_loaded=true"
+python3 -c 'import json,sys; b=json.loads(sys.argv[1]); assert b["anomaly_loaded"] is True, b' \
+  "$health" || fail "/health does not report anomaly_loaded=true"
 
 echo "== POST /predict examples/predict_request_late.json"
 result=$(curl -fsS -X POST "$API/predict" -H 'Content-Type: application/json' \
@@ -66,6 +69,20 @@ assert got["rul_lower"] <= got["predicted_rul"] <= got["rul_upper"], got
 keys = ("predicted_rul", "health_status", "cycles_received", "last_cycle", "model_version")
 for key in (*keys, "rul_lower", "rul_upper", "interval_level"):
     assert got[key] == expected[key], (key, got[key], expected[key])
+PY
+
+echo "== POST /anomaly examples/predict_request.json and examples/predict_request_late.json"
+early=$(curl -fsS -X POST "$API/anomaly" -H 'Content-Type: application/json' \
+  -d @examples/predict_request.json) || fail "/anomaly request (engine 1) failed"
+late=$(curl -fsS -X POST "$API/anomaly" -H 'Content-Type: application/json' \
+  -d @examples/predict_request_late.json) || fail "/anomaly request (engine 34) failed"
+echo "   $early"
+echo "   $late"
+python3 - "$early" "$late" <<'PY' || fail "/anomaly results do not match expectations"
+import json, sys
+early, late = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+assert late["is_anomalous"] is True, late
+assert early["normalized_score"] < late["normalized_score"], (early, late)
 PY
 
 echo "== GET dashboard /_stcore/health"

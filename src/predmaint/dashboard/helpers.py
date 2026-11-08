@@ -162,3 +162,18 @@ def sensor_chart_frame(history: EngineHistory, sensors: list[str]) -> pd.DataFra
     scaled = (values - values.mean()) / std
     scaled.insert(0, "cycle", frame["cycle"])
     return scaled.melt(id_vars="cycle", var_name="sensor", value_name="standardised value")
+
+
+def anomaly_badge(body: Mapping[str, Any] | None) -> tuple[str, str] | None:
+    """``("ANOMALOUS", "red")`` / ``("NORMAL", "green")`` for an /anomaly body, else ``None``."""
+    if not body or body.get("is_anomalous") is None:
+        return None
+    return ("ANOMALOUS", "red") if body["is_anomalous"] else ("NORMAL", "green")
+
+
+def anomaly_series_frame(body: Mapping[str, Any] | None) -> pd.DataFrame | None:
+    """``cycle, normalized_score`` rows from an ``/anomaly?include_series=true`` body, or None."""
+    series = (body or {}).get("series")
+    if not series:
+        return None
+    return pd.DataFrame(series, columns=["cycle", "normalized_score"])

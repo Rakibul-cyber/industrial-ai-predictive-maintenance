@@ -6,6 +6,7 @@ Usage::
     python scripts/train.py --model primary
     python scripts/train.py --select
     python scripts/train.py --model intervals   # after --select (ADR-034)
+    python scripts/train.py --model anomaly     # after --select (ADR-035)
 """
 
 from predmaint.models.train import main

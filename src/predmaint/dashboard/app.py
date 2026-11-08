@@ -17,6 +17,8 @@ from predmaint.dashboard.helpers import (
     DATASETS,
     TRAJECTORY_STEP,
     TrajectoryError,
+    anomaly_badge,
+    anomaly_series_frame,
     compute_trajectory,
     engine_history,
     engine_payload,
@@ -42,6 +44,20 @@ def load_data(cmapss_dir: str) -> FD001Data | None:
         return load_fd001(Path(cmapss_dir))
     except (FileNotFoundError, ValueError):
         return None
+
+
+@st.cache_data(show_spinner="Scoring the engine's history with /anomaly…")
+def anomaly_series(
+    cmapss_dir: str, dataset: str, unit: int, model_version: str, base_url: str
+) -> dict[str, Any] | None:
+    """ONE /anomaly?include_series=true call on the engine's full history (cached)."""
+    data = load_data(cmapss_dir)
+    if data is None:
+        return None
+    history = engine_history(data, dataset, unit)
+    api = ApiClient(base_url, settings.api_timeout_seconds)
+    result = api.anomaly(engine_payload(history, history.last_cycle), include_series=True)
+    return result.body if result.ok else None
 
 
 @st.cache_data(show_spinner="Calling /predict along the engine's life…")
@@ -132,6 +148,16 @@ with explorer:
                     st.caption("Health status")
                     status_badge(result.body["health_status"])
                 right.metric("True RUL (cycles)", truth)
+                if health.body.get("anomaly_loaded"):
+                    scored = client.anomaly(engine_payload(history, n))
+                    badge = anomaly_badge(scored.body if scored.ok else None)
+                    if badge:
+                        with mid:
+                            st.caption(
+                                f"Anomaly score {scored.body['normalized_score']:.2f} "
+                                "(normalised; > 1 = anomalous)"
+                            )
+                            st.badge(badge[0], color=badge[1])  # type: ignore[arg-type]
                 st.caption(
                     f"cycles used: {result.body['cycles_used']} of {result.body['cycles_received']}"
                     f" sent · last cycle {result.body['last_cycle']}"
@@ -247,6 +273,45 @@ with trajectory_tab:
                 )
                 with st.expander("Trajectory table"):
                     st.dataframe(frame, hide_index=True)
+                if health.body.get("anomaly_loaded"):
+                    scored = anomaly_series(
+                        cmapss_dir, *key[:2], str(model_version), settings.api_base_url
+                    )
+                    series = anomaly_series_frame(scored)
+                    if series is not None:
+                        st.subheader("Anomaly score over the engine's life")
+                        st.vega_lite_chart(
+                            series,
+                            {
+                                "layer": [
+                                    {
+                                        "mark": {"type": "line"},
+                                        "encoding": {
+                                            "x": {"field": "cycle", "type": "quantitative"},
+                                            "y": {
+                                                "field": "normalized_score",
+                                                "type": "quantitative",
+                                            },
+                                        },
+                                    },
+                                    {
+                                        "mark": {
+                                            "type": "rule",
+                                            "color": "red",
+                                            "strokeDash": [6, 4],
+                                        },
+                                        "encoding": {"y": {"datum": 1.0}},
+                                    },
+                                ]
+                            },
+                            width="stretch",
+                        )
+                        st.caption(
+                            "Normalised anomaly score (distance to the healthy reference / "
+                            "threshold) from one /anomaly call; dashed line = threshold 1.0."
+                        )
+                    else:
+                        st.caption("Anomaly series unavailable.")
         elif not model_loaded:
             st.info("Trajectory disabled: the API is unreachable or has no model.")
 
@@ -322,6 +387,33 @@ with model_tab:
             )
         else:
             st.caption("No prediction-interval artifact loaded; point predictions only.")
+        anomaly = info.body.get("anomaly")
+        if anomaly:
+            st.subheader("Anomaly detector")
+            fraction = anomaly["detection_fraction_of_life_median"]
+            rul = anomaly["detection_true_rul_median"]
+            trend = anomaly["trend_median_train_oof"]
+            st.table(
+                pd.DataFrame(
+                    {
+                        "value": {
+                            "Method / version": f"{anomaly['method']} · {anomaly['model_version']}",
+                            "Threshold (OOF q0.99)": f"{anomaly['threshold']:.3f}",
+                            "Healthy reference rows": f"{anomaly['healthy_rows']:,}",
+                            "Trend median (train OOF)": "—" if trend is None else f"{trend:.3f}",
+                            "False-alarm rate (healthy)": (
+                                f"{anomaly['false_alarm_rate_healthy']:.3%}"
+                            ),
+                            "Median detection": "—"
+                            if fraction is None
+                            else f"{fraction:.0%} of life, true RUL {rul:.0f}",
+                            "Acceptance (median trend > 0.7)": "met"
+                            if anomaly["acceptance_met"]
+                            else "NOT met",
+                        }
+                    }
+                )
+            )
         st.subheader("Metrics")
         st.table(
             pd.DataFrame(

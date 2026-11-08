@@ -172,6 +172,9 @@ predict_rul(cycles: pd.DataFrame | Sequence[Mapping], model: LoadedModel,
             intervals: IntervalModel | None = None) -> PredictionResult
 load_interval_model(path: Path | None = None) -> IntervalModel   # default: next to $MODEL_PATH (M8)
 order_bounds(point, lower, upper, rul_cap) -> (lower, upper, n_reordered)
+load_anomaly_model(path: Path | None = None) -> AnomalyModel     # default: next to $MODEL_PATH (M9)
+score_anomaly(cycles, model: LoadedModel, anomaly: AnomalyModel,
+              include_series: bool = False) -> AnomalyResult    # M9, ADR-035
 health_status(rul: float) -> Literal["critical", "warning", "healthy"]
 predict_from_features(pipeline, features, rul_cap) -> np.ndarray   # shared clamp, also used offline
 ```
@@ -182,6 +185,7 @@ predict_from_features(pipeline, features, rul_cap) -> np.ndarray   # shared clam
 - Only the **last `window_size` records** are used. They pass through the shared `features.build.build_features` to produce one feature row; extra older history cannot change the result (tested).
 - `PredictionResult`: `predicted_rul` (float, clamped to `[0, rul_cap]`, ADR-027), `health_status` (ADR-025), `cycles_received`, `cycles_used` (= `window_size`), `last_cycle`, `model_version`, `warnings` (`OUT_OF_TRAINING_RANGE` messages for required sensors in the used window).
 - **Intervals (M8, ADR-034):** with a matching `IntervalModel` (`for_model_version` == served `model_version` and identical `feature_names`), `PredictionResult` also carries `rul_lower`, `rul_upper` (clamped to [0, `rul_cap`], ordered around the point) and `interval_level` (0.8). Without one, or on a mismatch (logged warning), these are `None`. The point prediction is byte-identical in all cases (tested).
+- **Anomaly score (M9, ADR-035):** `score_anomaly` runs the **same validation function** as `predict_rul` (identical exceptions and messages, tested), builds features over the whole validated request and scores every full-window row with the detector. `AnomalyResult`: `anomaly_score` (Mahalanobis distance of the last row), `normalized_score` (= score / threshold), `threshold`, `is_anomalous` (normalised > 1), `last_cycle`, `cycles_received`, `model_version`, and optional `series` (`cycles_received − window_size + 1` entries). A detector whose `for_model_version` differs from the served model, or whose features the served model does not produce, raises `AnomalyNotAvailableError`. The point model and interval code paths are not touched.
 - Health status (ADR-025, `config.HEALTH_BANDS`): `critical` if RUL < 20; `warning` if 20 ≤ RUL < 60; `healthy` if RUL ≥ 60.
 - The offline test evaluation and `predict_rul` produce bit-identical predictions (contract test; real-data test recomputes the served model's test RMSE through `predict_rul`).
 
@@ -196,6 +200,20 @@ Two `HistGradientBoostingRegressor(loss="quantile")` models (q = 0.1, 0.9 → no
 
 Coverage for true RUL > 125 is 0 against unclipped truth by construction (cap); bucket tables and interpretation in [16 §9](16_EVALUATION_REPORT.md). Source: `reports/metrics_intervals.json`.
 
+### 10b. Anomaly detection (M9, ADR-035) — measured 2026-11-08T19:33:06Z
+
+`scripts/train.py --model anomaly` (after `--select`; refuses without `models/model_metadata.json`; ~2 s wall) fits `StandardScaler` → `LedoitWolf` on the **healthy reference**: training rows with a full 30-cycle window and true (uncapped) RUL ≥ 125, i.e. 5,329 rows from 90 of 100 engines (an engine needs ≥ 155 cycles). Features: the 14 kept sensors' `*_roll_mean` columns from `features.build`. Score = Mahalanobis distance; threshold = 99th percentile of **out-of-fold** healthy-row scores (5-fold GroupKFold by engine) = 5.4036 (in-sample would be 5.1510). The IsolationForest fallback (only if the median train-OOF trend were < 0.5) was not triggered.
+
+| Measure | Value |
+|---|---|
+| Median per-engine Spearman(score, cycle), train OOF / test | **0.680** (target > 0.7, **not met**) / 0.213 |
+| False-alarm rate on healthy rows (train OOF) | 0.0101 |
+| First sustained detection (3 cycles), train OOF | median 0.758 of life, true RUL 49.0; never flagged 0.020 |
+| Test engines flagged at last cycle | 0.250 overall; 0.750 for true RUL ≤ 20, 0.000 for > 125 |
+| Spearman(normalised score, predicted RUL), test last cycle | −0.613 |
+
+Full tables and what the evaluation does and does not prove: [16 §10](16_EVALUATION_REPORT.md). Source: `reports/metrics_anomaly.json`.
+
 ## 11. Limitations
 
 - FD001 only: one operating condition and one fault mode; the model is not valid for other conditions.
@@ -204,4 +222,5 @@ Coverage for true RUL > 125 is 0 against unclipped truth by construction (cap); 
 - The primary configuration was chosen by CV on the training set only, and selection is by CV, so the official test set stays a held-out report. The 12-configuration search still slightly favours the primary's CV estimate (best-of-12); its test RMSE (16.610) is close to its CV RMSE (16.559).
 - Rolling features need ≥ 30 cycles of history; younger engines cannot be scored.
 - Uncertainty: the M8 80 % intervals are below nominal coverage out-of-fold and cannot cover true RUL > 125; health bands are illustrative thresholds, not engineering limits.
+- The M9 anomaly score is unsupervised: it measures distance from a population healthy reference, has no fault labels to validate against, and missed its trend target (0.680 ≤ 0.7).
 - joblib artifacts are tied to the scikit-learn version (mismatch warning, 02 §7).

@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "artifact": "model_anomaly",
+  "model_version": "anomaly-20261108-a25df0e",
+  "method": "mahalanobis_ledoitwolf",
+  "for_model_version": "primary-20261108-f4c86df",
+  "features": [
+    "s_2_roll_mean",
+    "s_3_roll_mean",
+    "s_4_roll_mean",
+    "s_7_roll_mean",
+    "s_8_roll_mean",
+    "s_9_roll_mean",
+    "s_11_roll_mean",
+    "s_12_roll_mean",
+    "s_13_roll_mean",
+    "s_14_roll_mean",
+    "s_15_roll_mean",
+    "s_17_roll_mean",
+    "s_20_roll_mean",
+    "s_21_roll_mean"
+  ],
+  "threshold": 5.40363364967852,
+  "threshold_quantile": 0.99,
+  "healthy_reference": "rows with a full 30-cycle window and true RUL >= 125",
+  "healthy_min_rul": 125,
+  "healthy_rows": 5329,
+  "trained_at": "2026-11-08T19:33:06Z",
+  "git_sha": "a25df0e1dcb842c9259a24b9f533b54105cb1881",
+  "git_dirty": true,
+  "python_version": "3.13.3",
+  "library_versions": {
+    "scikit-learn": "1.9.1",
+    "pandas": "3.1.1",
+    "numpy": "2.5.4",
+    "joblib": "1.6.0"
+  },
+  "data": {
+    "subset": "FD001",
+    "train_sha256": "963b5e22825b34d8b21c69e1aeb4af3e647050eb672ee8834ba4b5d91d2de0f8",
+    "test_sha256": "3cda7109ce17bafb5443f2ac926cfcf88154b941b8c4cf95eb55d1ddd6f52851",
+    "rul_sha256": "a19c8ec94931949d0485bdc35118206e9c81c4547b422efb9cf86f4ceddbceca"
+  },
+  "config": {
+    "rul_cap": 125,
+    "window_size": 30,
+    "random_seed": 42,
+    "cv_folds": 5
+  },
+  "evaluation": {
+    "train_oof": {
+      "trend": {
+        "n_engines": 100,
+        "n_engines_scored": 100,
+        "median": 0.6798250694250569,
+        "p25": 0.5062667264125071,
+        "p75": 0.8177025501869081,
+        "share_above_0_7": 0.46
+      },
+      "false_alarm_rate_healthy": 0.010133233252017265,
+      "n_healthy_rows": 5329,
+      "detection": {
+        "consecutive_cycles": 3,
+        "n_engines": 100,
+        "never_flagged_fraction": 0.02,
+        "fraction_of_life": {
+          "median": 0.7581860706860707,
+          "p25": 0.6383478174008591,
+          "p75": 0.8719884488448845
+        },
+        "true_rul_at_detection": {
+          "median": 49.0,
+          "p25": 26.0,
+          "p75": 75.75
+        }
+      }
+    },
+    "test": {
+      "trend": {
+        "n_engines": 100,
+        "n_engines_scored": 99,
+        "median": 0.21268153179319896,
+        "p25": -0.1769070069945352,
+        "p75": 0.5687268427219225,
+        "share_above_0_7": 0.1414141414141414
+      },
+      "flagged_at_last_cycle": {
+        "overall": 0.25,
+        "buckets": [
+          {
+            "true_rul_bucket": "0-20",
+            "n": 16,
+            "flagged_fraction": 0.75
+          },
+          {
+            "true_rul_bucket": "21-60",
+            "n": 23,
+            "flagged_fraction": 0.391304347826087
+          },
+          {
+            "true_rul_bucket": "61-125",
+            "n": 50,
+            "flagged_fraction": 0.08
+          },
+          {
+            "true_rul_bucket": ">125",
+            "n": 11,
+            "flagged_fraction": 0.0
+          }
+        ]
+      },
+      "spearman_with_rul_prediction": -0.6129811370598759
+    },
+    "acceptance": {
+      "criterion": "median per-engine Spearman(score, cycle) on train OOF > 0.7",
+      "value": 0.6798250694250569,
+      "met": false
+    },
+    "fallback": {
+      "decision": "not needed: median train-OOF Spearman 0.680 >= 0.5",
+      "candidates": {
+        "mahalanobis_ledoitwolf": {
+          "threshold": 5.40363364967852,
+          "trend": {
+            "n_engines": 100,
+            "n_engines_scored": 100,
+            "median": 0.6798250694250569,
+            "p25": 0.5062667264125071,
+            "p75": 0.8177025501869081,
+            "share_above_0_7": 0.46
+          }
+        }
+      },
+      "chosen": "mahalanobis_ledoitwolf"
+    },
+    "threshold_check": {
+      "oof_threshold": 5.40363364967852,
+      "in_sample_threshold_all_healthy_rows": 5.150996217252409
+    }
+  },
+  "timings_seconds": {
+    "oof_evaluation": 0.06
+  }
+}

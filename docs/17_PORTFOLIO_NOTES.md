@@ -5,12 +5,12 @@ Talking points grounded in the implemented system. Numbers come from `reports/*.
 ## CV entry (3–4 lines)
 
 **Industrial AI — Predictive Maintenance Platform** (Python, scikit-learn, FastAPI, Streamlit, Docker, GitHub Actions).
-End-to-end remaining-useful-life prediction on NASA C-MAPSS FD001: checksummed data pipeline, leakage-safe rolling features, engine-grouped CV, and a HistGradientBoosting model selected on CV over a Ridge baseline (test RMSE 16.61 vs 19.14 cycles), plus quantile-regression prediction intervals with honestly reported coverage.
-Served via a validated FastAPI service (p95 13.6 ms) and a Streamlit dashboard; Docker Compose with readiness healthchecks; 187 tests, 95 % coverage, CI with a Docker smoke test on amd64.
+End-to-end remaining-useful-life prediction on NASA C-MAPSS FD001: checksummed data pipeline, leakage-safe rolling features, engine-grouped CV, and a HistGradientBoosting model selected on CV over a Ridge baseline (test RMSE 16.61 vs 19.14 cycles), plus quantile-regression prediction intervals and an unsupervised anomaly score, both evaluated and reported honestly, including where they fall short.
+Served via a validated FastAPI service (p95 13.6 ms) and a Streamlit dashboard; Docker Compose with readiness healthchecks; 251 tests, 96 % coverage, CI with a Docker smoke test on amd64.
 
 ## 60-second summary
 
-"I built a predictive-maintenance system that estimates how many cycles a turbofan engine has left, using NASA's C-MAPSS simulation data. The data is downloaded and checksum-verified by script. Features are trailing 30-cycle statistics of 14 informative sensors, computed by one function that both training and the API use, so there's no train/serve skew. I validated with GroupKFold by engine, so the model is always scored on engines it hasn't seen, and I chose between a Ridge baseline and a gradient-boosted model on cross-validation, keeping the official test set purely for reporting. Boosting cut test RMSE from 19.1 to 16.6 cycles. The model is served by FastAPI with strict input validation and a single error format, and it degrades gracefully if the model is missing. A Streamlit dashboard calls the API to show predictions over an engine's life. Everything runs with one `docker compose up` from a fresh clone, and CI runs lint, 187 tests with a coverage gate and a Docker smoke test."
+"I built a predictive-maintenance system that estimates how many cycles a turbofan engine has left, using NASA's C-MAPSS simulation data. The data is downloaded and checksum-verified by script. Features are trailing 30-cycle statistics of 14 informative sensors, computed by one function that both training and the API use, so there's no train/serve skew. I validated with GroupKFold by engine, so the model is always scored on engines it hasn't seen, and I chose between a Ridge baseline and a gradient-boosted model on cross-validation, keeping the official test set purely for reporting. Boosting cut test RMSE from 19.1 to 16.6 cycles. The model is served by FastAPI with strict input validation and a single error format, and it degrades gracefully if the model is missing. A Streamlit dashboard calls the API to show predictions over an engine's life. Everything runs with one `docker compose up` from a fresh clone, and CI runs lint, 251 tests with a coverage gate and a Docker smoke test. Later I added prediction intervals and a simple anomaly score, and I report that both miss their nominal targets."
 
 ## Likely interview questions
 
@@ -45,11 +45,12 @@ On the dev machine LightGBM installed but failed to import (missing `libomp`), a
 The API starts anyway. `/health` returns 200 with `model_loaded: false`, while `/predict` and `/model/info` return 503 in the standard error envelope. The Docker healthcheck reads `model_loaded`, so the container is unhealthy and the dashboard waits. scikit-learn is pinned, `/model/info` reports a version match, and a test fails if the installed version differs from the one used for training.
 
 **8. How good is the model, honestly?**
-Test RMSE 16.6 and MAE 12.6 cycles. That's solid for a simple tabular approach, but I would not claim state of the art. Published deep-learning results on FD001 are generally reported lower, but they often score against clipped truth, so they aren't directly comparable; I did not verify specific numbers in this project. It is most accurate near failure (MAE 3.4 for true RUL ≤ 20). For engines with 21–60 cycles left it is on average ~5 cycles late, which is the risky direction for maintenance. It gives no uncertainty estimate.
+Test RMSE 16.6 and MAE 12.6 cycles. That's solid for a simple tabular approach, but I would not claim state of the art. Published deep-learning results on FD001 are generally reported lower, but they often score against clipped truth, so they aren't directly comparable; I did not verify specific numbers in this project. It is most accurate near failure (MAE 3.4 for true RUL ≤ 20). For engines with 21–60 cycles left it is on average ~5 cycles late, which is the risky direction for maintenance. Since M8 it gives an 80 % interval, which under-covers (question 11).
 
 **9. What would you do with more time?**
 - Calibrate or bias-correct the 21–60 range.
-- Add prediction intervals (quantile boosting or conformal prediction).
+- Calibrate the M8 intervals (conformal adjustment on out-of-fold residuals).
+- Give the anomaly score engine-specific baselines (question 12).
 - Extend to FD002–FD004 with per-regime normalisation.
 - Try a sequence model under the same CV protocol.
 - Add input-drift monitoring against the stored training ranges.
@@ -60,17 +61,28 @@ It is 451 KB and makes a fresh clone runnable with `docker compose up` alone. Th
 **11. Why quantile regression for the intervals, and what does the RUL cap do to coverage?** (M8)
 Two extra HistGradientBoosting models with quantile loss (q = 0.1 and 0.9) reuse the exact pipeline and hyperparameters of the served model. That means no new dependency and no search, and the widths depend on the input. The point model is untouched, and the API falls back to null bounds if the artifact doesn't match it. The cap is the honest catch: the quantile models learn capped labels and the bounds are clamped at 125, so an engine whose true RUL is above 125 can never be covered. Against unclipped truth, out-of-fold coverage is 0.509 overall and 0 in the > 125 bucket. Against the capped target it's 0.737, still below the nominal 0.80. I reported that rather than tuning toward 80 %; conformal calibration on out-of-fold residuals would be my next step.
 
+**12. How do you evaluate an anomaly detector when there are no anomaly labels?** (M9)
+C-MAPSS has run-to-failure trajectories but no labelled faults, so I treat "anomaly" as distance from a healthy state and ask whether the score behaves like a health indicator. The healthy reference is training rows with true RUL ≥ 125, where the RUL target is flat. The score is a Mahalanobis distance on the 14 rolling-mean sensors with a Ledoit-Wolf covariance. The threshold is the 99th percentile of **out-of-fold** healthy scores: in-sample it would be 5.15 instead of 5.40, which is optimistic. I fixed five checks before looking at results:
+- trend: per-engine Spearman(score, cycle), target median > 0.7;
+- false alarms on healthy rows;
+- detection timing (3 consecutive cycles above threshold);
+- test-engine flags by true-RUL bucket;
+- agreement with the RUL model.
+
+The result: the false-alarm rate is 1.01 % (as designed), the first sustained detection comes at a median 76 % of life with 49 cycles left, and the score correlates −0.61 with the predicted RUL. But the median trend is **0.680, so the target was missed**. I reported it, didn't tune the method or the target afterwards, and kept the project title unchanged. What it does not prove: detection of real faults, or calibrated alarm timing.
+
 ## Strongest points
 
 - An honest evaluation protocol: grouped CV, test used only for reporting, residuals analysed by RUL range, limitations stated.
 - No train/serve skew by construction, backed by contract tests.
 - Reproducibility: checksummed data, pinned dependencies, deterministic training, byte-identical retrain from a fresh clone.
 - Production habits at small scale: one error envelope, degraded mode, readiness healthchecks, non-root digest-pinned image, CI with a container smoke test.
-- A full decision trail: 32 ADRs and 6 change records.
+- A full decision trail: 35 ADRs and 10 change records.
 
 ## Weakest points
 
 - Modest model accuracy; the 80 % intervals (M8) are under-covering and cannot cover true RUL > 125; optimistic bias in the 21–60 cycle range.
+- The anomaly score (M9) missed its trend target (0.680 ≤ 0.7) and has no labels to be validated against.
 - Single subset (FD001) on simulated data.
 - The cap hides long-RUL engines (the engine 1 demo sits at 125).
 - One 1.1 GB image serves both roles; the API carries Streamlit's dependencies.

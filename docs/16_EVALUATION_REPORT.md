@@ -1,6 +1,6 @@
 # 16 — Evaluation Report
 
-All numbers in this report are read from the committed files [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) (§9), [`reports/metrics_baseline.json`](../reports/metrics_baseline.json), [`reports/metrics_primary.json`](../reports/metrics_primary.json), [`reports/model_comparison.json`](../reports/model_comparison.json), [`reports/residuals_by_rul_bucket.json`](../reports/residuals_by_rul_bucket.json) and [`models/model_metadata.json`](../models/model_metadata.json); the document was generated from them in Milestone 7. The served model is `primary-20261108-f4c86df`.
+All numbers in this report are read from the committed files [`reports/metrics_anomaly.json`](../reports/metrics_anomaly.json) (§10), [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) (§9), [`reports/metrics_baseline.json`](../reports/metrics_baseline.json), [`reports/metrics_primary.json`](../reports/metrics_primary.json), [`reports/model_comparison.json`](../reports/model_comparison.json), [`reports/residuals_by_rul_bucket.json`](../reports/residuals_by_rul_bucket.json) and [`models/model_metadata.json`](../models/model_metadata.json); the document was generated from them in Milestone 7. The served model is `primary-20261108-f4c86df`.
 
 ## 1. Dataset and protocol
 
@@ -93,7 +93,7 @@ None of the following is part of the MVP. Each would need its own change record 
 | Extension (NOT IMPLEMENTED) | What it would need |
 |---|---|
 | FD002–FD004 (multiple conditions / fault modes) | Operating-condition normalisation (per-regime sensor scaling), regime-aware features, re-validated data contract and checksums, larger evaluation |
-| Anomaly detection | A separate unsupervised model (e.g. reconstruction error on healthy early cycles), its own threshold calibration, evaluation protocol and API endpoint |
+| ~~Anomaly detection~~ — **IMPLEMENTED in M9** (§10, ADR-035); trend target not met | Remaining: engine-specific baselines, a detection-timing target agreed in advance, evaluation on data with labelled faults |
 | Sequence models (LSTM/CNN/Transformer) | A deep-learning dependency (ADR), GPU-optional training, sequence windows in the shared feature path, longer training |
 | ~~Prediction intervals~~ — **IMPLEMENTED in M8** (§9, ADR-034) | Remaining: calibration toward nominal coverage (e.g. conformal adjustment on out-of-fold residuals) |
 | Bias correction for the 21–60 range | Residual analysis on CV folds, asymmetric loss or post-hoc calibration, then re-selection |
@@ -139,3 +139,46 @@ Reordered: **8** of 100.
 - **Width:** mean 37.2 cycles (CV) / 42.1 (test). Near failure the interval is narrowest (test 0–20: mean 27.7), where it matters most.
 - **Demo engines:** late-life test engine 34 predicts 6.3 in [4.84, 18.76] (true 7, covered). Early-life test engine 1 predicts 125.0 in [118.45, 125.0] (true 112, **not** covered): the cap effect on a single engine.
 - Honest use: treat the interval as an approximate ~74 % (CV, clipped truth) band for engines not beyond the cap, not as a calibrated 80 % guarantee. Calibration (e.g. conformal adjustment on out-of-fold residuals) is a candidate next step, NOT IMPLEMENTED.
+
+## 10. Anomaly detection (Milestone 9, ADR-035)
+
+Numbers in this section are read from [`reports/metrics_anomaly.json`](../reports/metrics_anomaly.json) (detector `anomaly-20261108-a25df0e`, for served model `primary-20261108-f4c86df`).
+
+**What is measured.** C-MAPSS has no anomaly labels. The "anomaly" score is the Mahalanobis distance (Ledoit-Wolf covariance, standardised features) of an engine's 14 trailing 30-cycle sensor means from a **healthy reference**: 5,329 training rows with a full window and true RUL ≥ 125, from 90 of 100 engines (an engine needs ≥ 155 cycles of life to contribute). The threshold is the 99% quantile of **out-of-fold** healthy-row scores (5-fold GroupKFold by engine): **5.4036**; the in-sample quantile would be 5.1510, i.e. lower and optimistic. `normalized_score = score / threshold`; `> 1` is flagged.
+
+### 10a. Results
+
+| # | Measure | Train (out-of-fold, 100 engines run to failure) | Test (100 truncated engines) |
+|---|---|---|---|
+| 1 | Per-engine Spearman(normalised score, cycle): median (IQR) | **0.680 (IQR 0.506–0.818)** | 0.213 (IQR -0.177–0.569) |
+| 1 | Share of engines with Spearman > 0.7 | 0.460 (100 engines scored) | 0.141 (99 scored; 1 engine has too few full-window cycles) |
+| 2 | False-alarm rate on healthy rows (score > threshold) | 0.0101 of 5,329 rows (expected ≈ 0.01 by construction) | — |
+| 3 | First sustained detection (3 consecutive cycles > threshold): fraction of life, median (IQR) | 0.758 (IQR 0.638–0.872) | — (test engines do not reach failure) |
+| 3 | True RUL at detection, median (IQR) | 49.0 (IQR 26.0–75.8) cycles | — |
+| 3 | Engines never flagged | 0.020 | — |
+| 4 | Engines flagged at their last observed cycle | — | 0.250 overall (by bucket below) |
+| 5 | Spearman(normalised score, predicted RUL) at the last cycle | — | -0.613 |
+
+| Test engines by true RUL at last cycle | n | Flagged fraction |
+|---|---|---|
+| true RUL 0-20 | 16 | 0.750 |
+| true RUL 21-60 | 23 | 0.391 |
+| true RUL 61-125 | 50 | 0.080 |
+| true RUL >125 | 11 | 0.000 |
+
+**Acceptance (FR-019):** median per-engine Spearman(score, cycle) on train OOF > 0.7 → value **0.680** → **NOT MET**. The IsolationForest fallback was not triggered (not needed: median train-OOF Spearman 0.680 >= 0.5). Nothing was tuned toward the target after seeing the result.
+
+### 10b. Reading the results
+
+- **The score rises with degradation, but not consistently enough to meet the target.** Half the engines have a train-OOF trend above 0.68; 46 % exceed 0.7. A whole-life Spearman is diluted by the long flat early phase, where the score is noise around the healthy level.
+- **False alarms match the design rate.** 1.01 % of healthy rows exceed the threshold, consistent with the out-of-fold 99th-percentile threshold (i.e. the threshold generalises to unseen engines).
+- **Detection is late but useful.** The first sustained flag comes at a median 76 % of life, when a median 49 cycles remain (IQR 26–76); 2 % of training engines are never flagged. Measured on true RUL, the median detection (49 cycles left) falls between the dashboard's warning (60) and critical (20) thresholds.
+- **Test trend is low because most test engines are cut off early.** In-session check on the committed artifact (command in 14): median per-engine Spearman is 0.517 for test engines with true RUL ≤ 60 (n = 39), 0.040 for 61–125 (n = 49) and −0.320 for > 125 (n = 11); across engines, trend vs true RUL at cutoff has Spearman −0.525. Engines still in the healthy region have no degradation trend to find.
+- **Flags concentrate near failure.** 75 % of test engines with true RUL ≤ 20 are flagged at their last cycle, 39 % for 21–60, 8 % for 61–125 and none above 125.
+- **The score agrees with the RUL model** (Spearman −0.613 with the predicted RUL: higher anomaly score, lower predicted RUL), even though the two models share only the feature function.
+- **Demo engines:** test engine 1 (31 cycles, true RUL 112) scores 0.6657 (normal); late-life engine 34 (203 cycles, true RUL 7) scores 1.1015 (anomalous).
+
+### 10c. What this evaluation does and does not prove
+
+- **Does show:** on simulated run-to-failure data, distance from a population healthy reference increases as engines degrade, the out-of-fold threshold keeps the false-alarm rate on unseen healthy engines at the designed ~1 %, and the first sustained flag typically falls in the last third of life (IQR 64–87 % of life).
+- **Does not show:** detection of real faults or of anything other than FD001's single simulated degradation mode; calibrated alarm timing (no labels define when an alarm *should* fire); robustness to sensor faults, drift or other operating conditions. The trend target (median > 0.7) was not met, so the score should be read as a coarse health indicator alongside the RUL prediction, not as a validated anomaly detector.

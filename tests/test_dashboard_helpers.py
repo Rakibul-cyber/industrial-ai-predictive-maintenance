@@ -10,6 +10,8 @@ import pytest
 from predmaint.dashboard.api_client import ApiResult
 from predmaint.dashboard.helpers import (
     TrajectoryError,
+    anomaly_badge,
+    anomaly_series_frame,
     compute_trajectory,
     engine_history,
     engine_payload,
@@ -156,3 +158,23 @@ def test_interval_text_handles_nulls() -> None:
     assert interval_text({"rul_lower": None, "rul_upper": None, "interval_level": None}) is None
     assert interval_text({}) is None
     assert interval_text({"rul_lower": 1.0, "rul_upper": 2.0}) == "Interval: 1.0 – 2.0 cycles"
+
+
+def test_anomaly_badge_and_nulls() -> None:
+    assert anomaly_badge({"is_anomalous": True}) == ("ANOMALOUS", "red")
+    assert anomaly_badge({"is_anomalous": False}) == ("NORMAL", "green")
+    assert anomaly_badge(None) is None
+    assert anomaly_badge({}) is None
+    assert anomaly_badge({"is_anomalous": None}) is None
+
+
+def test_anomaly_series_frame() -> None:
+    body = {
+        "series": [{"cycle": 30, "normalized_score": 0.5}, {"cycle": 31, "normalized_score": 1.2}]
+    }
+    frame = anomaly_series_frame(body)
+    assert list(frame.columns) == ["cycle", "normalized_score"]
+    assert frame["cycle"].tolist() == [30, 31] and frame["normalized_score"].tolist() == [0.5, 1.2]
+    assert anomaly_series_frame(None) is None
+    assert anomaly_series_frame({"series": None}) is None
+    assert anomaly_series_frame({"series": []}) is None

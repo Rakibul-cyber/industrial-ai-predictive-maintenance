@@ -23,6 +23,7 @@ from predmaint.models.artifacts import load_artifacts
 
 SERVED_ARTIFACT = "model"
 INTERVAL_ARTIFACT = "model_intervals"
+ANOMALY_ARTIFACT = "model_anomaly"
 HealthStatus = Literal["critical", "warning", "healthy"]
 logger = logging.getLogger("predmaint.models")
 
@@ -30,6 +31,10 @@ logger = logging.getLogger("predmaint.models")
 # --- Errors ----------------------------------------------------------------------------------
 class ModelNotAvailableError(RuntimeError):
     """The served model artifact is missing or cannot be loaded (API: 503 MODEL_UNAVAILABLE)."""
+
+
+class AnomalyNotAvailableError(RuntimeError):
+    """No anomaly detector matching the served model is loaded (API: 503 ANOMALY_UNAVAILABLE)."""
 
 
 class InputContractError(ValueError):
@@ -183,6 +188,68 @@ def _load_cached(target: Path) -> LoadedModel:
     return LoadedModel(pipeline=pipeline, metadata=metadata)
 
 
+@dataclass(frozen=True)
+class AnomalyModel:
+    """Fitted anomaly detector (ADR-035): ``detector`` dict + metadata."""
+
+    detector: dict[str, Any]
+    metadata: dict[str, Any]
+
+    @property
+    def features(self) -> list[str]:
+        return list(self.detector["features"])
+
+    @property
+    def threshold(self) -> float:
+        return float(self.detector["threshold"])
+
+    @property
+    def for_model_version(self) -> str:
+        return str(self.metadata["for_model_version"])
+
+    @property
+    def model_version(self) -> str:
+        return str(self.metadata["model_version"])
+
+
+@dataclass(frozen=True)
+class AnomalyResult:
+    """Output of :func:`score_anomaly`."""
+
+    last_cycle: int
+    anomaly_score: float
+    normalized_score: float
+    threshold: float
+    is_anomalous: bool
+    model_version: str
+    cycles_received: int
+    series: list[dict[str, float]] | None = None
+
+
+def detector_scores(detector: Mapping[str, Any], features: pd.DataFrame) -> np.ndarray:
+    """Raw anomaly scores (higher = further from the healthy reference)."""
+    x = features[list(detector["features"])].to_numpy(dtype=float)
+    if detector["method"] == "mahalanobis_ledoitwolf":
+        z = detector["scaler"].transform(x)
+        return np.sqrt(np.maximum(detector["covariance"].mahalanobis(z), 0.0))
+    if detector["method"] == "isolation_forest":
+        return -detector["model"].score_samples(x)
+    raise ValueError(f"unknown anomaly method {detector['method']!r}")
+
+
+def anomaly_mismatch(anomaly: AnomalyModel, model: "LoadedModel") -> str | None:
+    """Why ``anomaly`` must not be used with ``model`` (``None`` if they belong together)."""
+    if anomaly.for_model_version != model.model_version:
+        return (
+            f"anomaly artifact is for model {anomaly.for_model_version!r}, "
+            f"served model is {model.model_version!r}"
+        )
+    missing = [f for f in anomaly.features if f not in model.metadata["feature_names"]]
+    if missing:
+        return f"anomaly features not produced by the served model's pipeline: {missing}"
+    return None
+
+
 def interval_path_for(model_path: Path) -> Path:
     """The interval artifact lives next to the served model: ``<dir>/model_intervals.joblib``."""
     directory = model_path.parent if model_path.suffix == ".joblib" else model_path
@@ -215,6 +282,40 @@ def load_interval_model(path: Path | None = None) -> IntervalModel:
     return _load_intervals_cached(target)
 
 
+def anomaly_path_for(model_path: Path) -> Path:
+    """The anomaly artifact lives next to the served model: ``<dir>/model_anomaly.joblib``."""
+    directory = model_path.parent if model_path.suffix == ".joblib" else model_path
+    return directory / f"{ANOMALY_ARTIFACT}.joblib"
+
+
+@functools.cache
+def _load_anomaly_cached(target: Path) -> AnomalyModel:
+    try:
+        detector, metadata = load_artifacts(target.parent, target.stem)
+    except FileNotFoundError as exc:
+        raise AnomalyNotAvailableError(str(exc)) from exc
+    except Exception as exc:  # corrupt pickle/JSON, schema mismatch, incompatible library
+        raise AnomalyNotAvailableError(
+            f"could not load anomaly model from {target}: {exc}"
+        ) from exc
+    for key in ("for_model_version", "model_version", "threshold"):
+        if key not in metadata:
+            raise AnomalyNotAvailableError(f"{target}: metadata lacks {key!r}")
+    if not isinstance(detector, dict) or not {"method", "features", "threshold"} <= set(detector):
+        raise AnomalyNotAvailableError(f"{target}: unexpected detector object")
+    return AnomalyModel(detector=detector, metadata=metadata)
+
+
+def load_anomaly_model(path: Path | None = None) -> AnomalyModel:
+    """Load the anomaly artifact (default: next to ``$MODEL_PATH``) once and cache it.
+
+    Raises:
+        AnomalyNotAvailableError: if the files are missing or cannot be loaded.
+    """
+    target = (path or anomaly_path_for(get_settings().model_path)).resolve()
+    return _load_anomaly_cached(target)
+
+
 def load_model(model_path: Path | None = None) -> LoadedModel:
     """Load the served model once per path and cache it.
 
@@ -234,10 +335,13 @@ def clear_model_cache() -> None:
     """Drop cached models and interval artifacts (e.g. after promoting a new artifact)."""
     _load_cached.cache_clear()
     _load_intervals_cached.cache_clear()
+    _load_anomaly_cached.cache_clear()
 
 
 # --- Prediction ------------------------------------------------------------------------------
-def _validated_window(frame: pd.DataFrame, model: LoadedModel) -> pd.DataFrame:
+def _validated_frame(frame: pd.DataFrame, model: LoadedModel) -> pd.DataFrame:
+    """Validate the input contract (shared by ``predict_rul`` and ``score_anomaly``) and return
+    all rows' ``cycle`` + required-sensor columns with a constant ``unit`` column."""
     if len(frame) < model.window_size:
         raise InsufficientHistoryError(
             f"{len(frame)} cycles received; at least {model.window_size} are required"
@@ -259,10 +363,14 @@ def _validated_window(frame: pd.DataFrame, model: LoadedModel) -> pd.DataFrame:
         raise NonConsecutiveCyclesError(
             "cycles must be strictly increasing by exactly 1 in the order given"
         )
-    window = frame[required].iloc[-model.window_size :].copy()
-    window["cycle"] = window["cycle"].astype("int64")
-    window["unit"] = 0
-    return window
+    validated = frame[required].copy()
+    validated["cycle"] = validated["cycle"].astype("int64")
+    validated["unit"] = 0
+    return validated
+
+
+def _validated_window(frame: pd.DataFrame, model: LoadedModel) -> pd.DataFrame:
+    return _validated_frame(frame, model).iloc[-model.window_size :]
 
 
 def _range_warnings(window: pd.DataFrame, model: LoadedModel) -> list[str]:
@@ -328,4 +436,47 @@ def predict_rul(
         rul_lower=rul_lower,
         rul_upper=rul_upper,
         interval_level=level,
+    )
+
+
+def score_anomaly(
+    cycles: pd.DataFrame | Sequence[Mapping[str, Any]],
+    model: LoadedModel,
+    anomaly: AnomalyModel,
+    include_series: bool = False,
+) -> AnomalyResult:
+    """Anomaly score (ADR-035) at the last cycle, with the same input contract as ``predict_rul``.
+
+    With ``include_series`` the normalised score is returned for every cycle that has a full
+    trailing window (``cycles_received - window_size + 1`` entries).
+
+    Raises:
+        AnomalyNotAvailableError: if ``anomaly`` does not belong to ``model``.
+        InputContractError subclasses: exactly as ``predict_rul``.
+    """
+    reason = anomaly_mismatch(anomaly, model)
+    if reason is not None:
+        raise AnomalyNotAvailableError(reason)
+    frame = cycles if isinstance(cycles, pd.DataFrame) else pd.DataFrame(list(cycles))
+    validated = _validated_frame(frame.reset_index(drop=True), model)
+    features = build_features(validated, model.required_sensors, model.window_size)
+    raw = detector_scores(anomaly.detector, features)
+    normalized = raw / anomaly.threshold
+    if not np.isfinite(raw).all():
+        raise InvalidValuesError("anomaly detector produced a non-finite score")
+    series = None
+    if include_series:
+        series = [
+            {"cycle": int(c), "normalized_score": float(v)}
+            for c, v in zip(features["cycle"], normalized, strict=True)
+        ]
+    return AnomalyResult(
+        last_cycle=int(features["cycle"].iloc[-1]),
+        anomaly_score=float(raw[-1]),
+        normalized_score=float(normalized[-1]),
+        threshold=anomaly.threshold,
+        is_anomalous=bool(normalized[-1] > 1.0),
+        model_version=anomaly.model_version,
+        cycles_received=len(frame),
+        series=series,
     )

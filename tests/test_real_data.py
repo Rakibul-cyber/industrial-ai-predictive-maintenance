@@ -78,6 +78,12 @@ def test_api_reproduces_committed_example(example: str) -> None:
     keys = ("unit_id", "cycles_received", "last_cycle", "predicted_rul", "health_status")
     for key in (*keys, "rul_lower", "rul_upper", "interval_level"):
         assert body[key] == expected[key], key
+    with TestClient(create_app(model_path=model_path)) as client:
+        scored = client.post("/anomaly", json=payload).json()
+    assert scored["unit_id"] == expected["unit_id"]
+    assert scored["last_cycle"] == expected["last_cycle"]
+    for key, value in expected["anomaly"].items():
+        assert scored[key] == value, key
 
 
 @pytest.mark.parametrize("unit", [1, 39, 69])  # 192, 128 (shortest), 362 (longest) cycles
@@ -126,3 +132,30 @@ def test_committed_intervals_reproduce_recorded_test_coverage(real_cmapss_dir: P
     summary = summarize_intervals(data.rul["rul"].to_numpy(dtype=float), lo, hi, 125, n)
     assert summary == intervals.metadata["evaluation"]["test"]
     assert np.all(lo <= point) and np.all(point <= hi)
+
+
+def test_committed_anomaly_reproduces_recorded_evaluation(
+    real_cmapss_dir: Path, tmp_path: Path
+) -> None:
+    """Retraining the detector (seconds) reproduces the committed threshold and evaluation."""
+    import json
+    import shutil
+
+    from predmaint.models.anomaly import run_anomaly_training
+    from predmaint.models.predict import anomaly_path_for, load_anomaly_model
+
+    model_path = get_settings().model_path
+    if not anomaly_path_for(model_path).is_file():
+        pytest.skip("no anomaly artifact (run scripts/train.py --model anomaly)")
+    clear_model_cache()
+    committed = load_anomaly_model(anomaly_path_for(model_path)).metadata
+    models = tmp_path / "models"
+    models.mkdir()
+    for name in ("model.joblib", "model_metadata.json"):
+        shutil.copyfile(model_path.parent / name, models / name)
+    fresh = run_anomaly_training(
+        real_cmapss_dir, models, tmp_path / "reports", echo=lambda _m: None
+    )
+    assert fresh["threshold"] == committed["threshold"]
+    assert fresh["for_model_version"] == committed["for_model_version"]
+    assert json.loads(json.dumps(fresh["evaluation"])) == committed["evaluation"]

@@ -260,6 +260,35 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** FR-018 met with evidence; point model and its artifact byte-identical; all tests pass with the 85 % gate; smoke test passes with the interval assertions.
 - **Estimated effort:** 4 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting review). Evidence in 14.
 
+## M9 — Minimal anomaly detection (post-MVP extension, CR-010 / ADR-035)
+
+- **Objective:** an unsupervised health-monitoring score (distance to a healthy reference), served by `POST /anomaly` and shown in the dashboard, evaluated without labels.
+- **Dependencies:** M8 (committed `a25df0e`, CI green).
+- **Requirements:** FR-019.
+- **Files to create:** `src/predmaint/models/anomaly.py`, `models/model_anomaly.joblib`, `models/model_anomaly_metadata.json`, `reports/metrics_anomaly.json`, `tests/test_anomaly.py`.
+- **Files to modify:** `src/predmaint/__init__.py` (0.3.0), `models/predict.py`, `models/train.py` (CLI), `api/{schemas,service,main,errors}.py`, `dashboard/{api_client,helpers,app}.py`, `scripts/make_request_payload.py`, `scripts/smoke_test.sh`, `Dockerfile`, `.gitignore`, `examples/expected_predictions.json`, tests, README, CLAUDE.md, docs.
+- **Tasks:**
+  - [x] M9-T1 Change control: CR-010, ADR-035, FR-019, doc 00 scope, M9 plan.
+  - [x] M9-T2 `models/anomaly.py` (`fit_detector`, `oof_scores`, `first_detection`, evaluation helpers, `run_anomaly_training`); `scripts/train.py --model anomaly` (refuses without `models/model_metadata.json`; runs in seconds).
+  - [x] M9-T3 Inference: `AnomalyModel`, `detector_scores`, `anomaly_mismatch`, `load_anomaly_model`, `score_anomaly` (shares `predict_rul`'s validation); point and interval outputs unchanged.
+  - [x] M9-T4 API 0.3.0: `POST /anomaly` (`?include_series=true`), `/health.anomaly_loaded`, `/model/info.anomaly`, 503 `ANOMALY_UNAVAILABLE`; warning + unavailable when absent or mismatched.
+  - [x] M9-T5 Dashboard: explorer normalised score + badge, trajectory anomaly chart from one `/anomaly?include_series=true` call, model-info anomaly table; graceful nulls.
+  - [x] M9-T6 Artifacts trained (committed-ready); sidecar gains an `anomaly` block (point/interval values unchanged); Dockerfile copies them; smoke test asserts `anomaly_loaded`, late example anomalous, engine 1 < engine 34.
+  - [x] M9-T7 Tests (`tests/test_anomaly.py`, API, dashboard, artifact, real data); evaluation in 16 §10.
+- **Verification commands:**
+
+  ```bash
+  ruff check . && ruff format --check .
+  pytest -q
+  python scripts/train.py --model anomaly
+  API_PORT=8001 python -m predmaint.api.main &   # curl /health, /anomaly (engine 1, 34), ?include_series=true
+  bash scripts/smoke_test.sh; echo $?
+  ls -l models/*.joblib
+  ```
+
+- **Acceptance criteria:** FR-019 measured and reported (met or not met stated plainly); point and interval artifacts byte-identical; all tests pass with the 85 % gate; smoke test passes with the anomaly assertions.
+- **Estimated effort:** 4 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting review). Implemented and verified; the FR-019 trend target was **not met** (median 0.680 ≤ 0.7, reported, not tuned). Evidence in 14.
+
 ## Requirement → milestone traceability
 
 | Milestone | Requirements |
@@ -272,3 +301,4 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 | M6 | FR-017 |
 | M7 | NFR-005, NFR-009 |
 | M8 | FR-018 |
+| M9 | FR-019 |

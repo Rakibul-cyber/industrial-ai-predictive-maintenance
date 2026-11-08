@@ -41,7 +41,7 @@ works end to end, and all acceptance criteria in [11](11_ACCEPTANCE_CRITERIA.md)
 ## 6. Out of scope (MVP)
 
 - Subsets FD002–FD004 (multiple operating conditions / fault modes).
-- Anomaly-detection models — planned extension, **NOT IMPLEMENTED** and not authorized (the MVP delivers RUL prediction only; see ADR-001, ADR-033).
+- Anomaly-detection models beyond the minimal M9 detector (ADR-035), e.g. autoencoders or supervised fault classifiers. The MVP delivered RUL prediction only; Milestone 9 adds a minimal unsupervised detector (see the post-MVP note in §7).
 - Deep learning / sequence models (LSTM, CNN, Transformers).
 - Hyperparameter search beyond the single bounded 12-configuration search of the primary model (ADR-026).
 - Cloud deployment, Kubernetes, authentication, multi-tenancy.
@@ -63,6 +63,8 @@ These are candidate extensions only after Milestone 7 and only via [15](15_CHANG
 | D7 | Final README and docs matching code | M7 |
 
 **Post-MVP extension (Milestone 8, CR-008 / ADR-034):** prediction intervals (nominal 80 %, quantile gradient boosting) on `/predict`, in the dashboard and in the evaluation report. This moves out of the extensions list into implemented scope; the other extensions remain NOT IMPLEMENTED.
+
+**Post-MVP extension (Milestone 9, CR-010 / ADR-035):** minimal unsupervised anomaly detection: Mahalanobis distance of rolling-mean sensors to a healthy reference (true RUL ≥ 125), out-of-fold threshold, `POST /anomaly`, dashboard view, and evaluation without labels (trend, false alarms, detection timing). Outcome: implemented and verified, but its trend target (median per-engine Spearman > 0.7 on train OOF) was **not met** (0.680; 16 §10), so the project title is unchanged. Remaining extensions stay NOT IMPLEMENTED.
 
 ## 8. Success criteria
 

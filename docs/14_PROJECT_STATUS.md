@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **MVP COMPLETE** (M0–M7) + **Milestone 8 (prediction intervals, CR-008) COMPLETE** — uncommitted, awaiting review. |
+| Current milestone | **MVP COMPLETE** (M0–M7) + M8 (prediction intervals, committed `a25df0e`) + **Milestone 9 (minimal anomaly detection, CR-010) COMPLETE** — uncommitted, awaiting review. FR-019 trend target **not met** (0.680 ≤ 0.7). |
 | Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `8d893ff` (CR-007 rename, committed and pushed by the user; CI run 42511719150 green). M8 work is uncommitted. |
-| Next approved action | User review and commit of M8 (the push runs the CI `docker` job with the interval assertions). Restart your running demo stack with `--build`; it still runs the pre-M8 image. Add the four screenshots under `docs/img/`. Further work goes through 15. |
+| Git ref | `main` = `origin/main` @ `a25df0e` (M8, committed and pushed by the user; CI run 42514386686 green: lint-test + docker). M9 work is uncommitted. |
+| Next approved action | User review and commit of M9 — commit the two new model files together with the four existing ones (10 §6); the push runs the CI `docker` job with the anomaly assertions. Rebuild any running demo stack with `--build`. Add the screenshots under `docs/img/`. Further work goes through 15. |
 
 ## Milestone tracker
 
@@ -19,7 +19,8 @@
 | M5 Dashboard (CR-005) | **Accepted** 2026-11-08; committed `6b4da81`, pushed; CI green | M5 section below |
 | M6 Docker, tests, CI (ADR-030–032) | **Accepted** 2026-11-08; committed `ccf68a7`, pushed; CI green incl. `docker` job (amd64) | M6 section below |
 | M7 Finalisation | **COMPLETE** 2026-11-08; committed `32fdae0` | M7 section below |
-| M8 Prediction intervals (CR-008, ADR-034) | **COMPLETE** 2026-11-08 (uncommitted, awaiting review) | M8 section below |
+| M8 Prediction intervals (CR-008, ADR-034) | **COMPLETE** 2026-11-08; committed `a25df0e`, pushed; CI run 42514386686 green | M8 section below |
+| M9 Minimal anomaly detection (CR-010, ADR-035) | **COMPLETE** 2026-11-08 (uncommitted, awaiting review); FR-019 trend target **not met** | M9 section below |
 
 ## M0 — what was verified (actual command results)
 
@@ -491,6 +492,63 @@ $ pytest -q -m data --no-cov → 12 passed · DATA_DIR=/nonexistent pytest -q �
 - **CR-009:** a demo stack started from this repo at 18:52:36Z (pre-M8 image, `api_version` 0.1.0) held ports 8000/8501, so the first smoke-test attempt failed. That stack was **not** stopped or modified. Fix: compose host ports via `API_HOST_PORT`/`DASHBOARD_HOST_PORT` (defaults unchanged), and the smoke test uses 18000/18501. The CI `docker` job will exercise the new interval assertions on the next push.
 - Coverage of `src/predmaint`: 95.42 % (from 94.98 %).
 
+## M9 — minimal anomaly detection (2026-11-08)
+
+**Start:** M8 committed by the user as `a25df0e`; CI run 42514386686 green (lint-test + docker). (A first M9 attempt was stopped because M8 was still uncommitted.) **Change control:** CR-010, ADR-035, FR-019, doc 00 scope, M9 plan.
+
+**Point and interval models untouched:** SHA-256 of `model.joblib` (`39bfa6fd…28c1`), `model_metadata.json` (`57f80600…dcfd`), `model_intervals.joblib` (`9c7cfc5e…6d12`) and `model_intervals_metadata.json` (`2dd9a1b3…c075`) recorded before M9 and re-checked after training and the smoke test: all `OK`. Re-running anomaly training reproduced `model_anomaly.joblib` byte-for-byte (`shasum -c` → `OK`).
+
+**scipy:** `scipy.stats.spearmanr` resolves from scipy **1.18.1**, installed as a scikit-learn 1.9.1 requirement (`pip show scikit-learn` → `Requires: joblib, narwhals, numpy, scipy, threadpoolctl`) in both the venv and the image. Not pinned in `requirements.txt`; no new dependency.
+
+```text
+$ python scripts/train.py --model anomaly
+Anomaly detector for served model primary-20261108-f4c86df: 14 rolling-mean features; healthy reference = true RUL >= 125: 5,329 rows from 90 engines (of 17,731 eligible rows)
+Method: mahalanobis_ledoitwolf; OOF threshold (q0.99) = 5.4036; in-sample threshold on all healthy rows = 5.1510
+Fallback: not needed: median train-OOF Spearman 0.680 >= 0.5
+[1] Trend Spearman(score, cycle), train OOF: median 0.680 (IQR 0.506–0.818); share > 0.7 = 0.460 (100/100 engines scored)
+[1] Trend Spearman(score, cycle), test: median 0.213 (IQR -0.177–0.569); share > 0.7 = 0.141 (99/100 engines scored)
+[2] False-alarm rate on healthy rows (train OOF): 0.0101 of 5,329 rows
+[3] Detection (score > threshold for 3 consecutive cycles), train OOF: fraction of life median 0.758 (IQR 0.638–0.872); true RUL at detection median 49.0 (IQR 26.0–75.8); never flagged 0.020
+[4] Test engines flagged at last cycle: overall 0.250; by true RUL: 0-20: 0.750 (n=16), 21-60: 0.391 (n=23), 61-125: 0.080 (n=50), >125: 0.000 (n=11)
+[5] Spearman(normalized score, RUL prediction) at test last cycle: -0.613
+FR-019 acceptance (median per-engine Spearman(score, cycle) on train OOF > 0.7): value 0.680 → NOT MET
+Timing: OOF evaluation 0.06 s
+Saved models/model_anomaly.joblib, models/model_anomaly_metadata.json, reports/metrics_anomaly.json
+Elapsed: 0.2 s     [time -p: real 1.82, user 1.85, sys 0.84]
+$ API_PORT=8001 python -m predmaint.api.main   (local API; 8000 kept free for the demo stack)
+$ curl /health → {"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.3.0","intervals_loaded":true,"anomaly_loaded":true}
+$ curl -X POST /anomaly @examples/predict_request.json → {"unit_id":"test-unit-1","last_cycle":31,"anomaly_score":3.5973,"normalized_score":0.6657,"threshold":5.4036,"is_anomalous":false,"model_version":"anomaly-20261108-a25df0e","series":null}
+$ curl -X POST /anomaly @examples/predict_request_late.json → {"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-a25df0e","series":null}
+$ curl -X POST "/anomaly?include_series=true" @examples/predict_request_late.json → series of 174 entries (= 203 − 30 + 1):
+  first 3: {cycle 30: 0.8445}, {31: 0.8533}, {32: 0.8337} … last 3: {201: 1.1271}, {202: 1.1481}, {203: 1.1015}
+$ curl -X POST /anomaly (10 records) → {"error":{"code":"INSUFFICIENT_CYCLES","message":"10 cycles received; at least 30 are required","details":[]}}
+$ bash scripts/smoke_test.sh; echo $?   (ports 18000/18501)
+  /health → {… "api_version":"0.3.0","intervals_loaded":true,"anomaly_loaded":true}
+  /predict late → {… "predicted_rul":6.3,"health_status":"critical", … "rul_lower":4.84,"rul_upper":18.76,"interval_level":0.8}
+  /anomaly engine 1 → normalized_score 0.6657, is_anomalous false · engine 34 → 1.1015, is_anomalous true
+  SMOKE TEST PASSED (arm64) · exit code: 0
+$ ls -l models/*.joblib → model.joblib 451385 · model_intervals.joblib 899705 · model_anomaly.joblib 4845 · (candidates: primary 451385, baseline 5297, not committed)
+$ docker image inspect predmaint:latest → 243,192,895 bytes content (docker images: 1.11GB); /app/models holds all six committed model files
+$ ruff check . → All checks passed!  ·  ruff format --check . → 70 files already formatted
+$ pytest -q → Required test coverage of 85% reached. Total coverage: 95.92% · 251 passed, 2 skipped
+$ pytest -q -m data --no-cov → 13 passed · DATA_DIR=/nonexistent pytest -q → 241 passed, 12 skipped; coverage 95.86% (gate reached)
+```
+
+**Test-trend check (in-session, committed artifact on real FD001; not stored in a report file):** per-engine Spearman(normalised score, cycle) on test engines, grouped by true RUL at cutoff: ≤ 60 → median 0.517 (n = 39); 61–125 → 0.040 (n = 49); > 125 → −0.320 (n = 11); Spearman(trend, true RUL) across engines = −0.525. This is the evidence for the explanation in 16 §10b.
+
+**Findings:**
+
+- **FR-019 acceptance NOT met:** median train-OOF trend 0.680 ≤ 0.7 (46 % of engines above 0.7). Reported, not tuned; the fallback threshold (0.5) was not reached, so IsolationForest was not tried. Per the M9 authorization, the project title stays unchanged and no title ADR was added; the feature is described everywhere as implemented but not meeting its target.
+- **ADR-035 corrected:** the healthy reference covers 90 of 100 engines (5,329 rows), not every engine. An engine needs ≥ 155 cycles of life (window 30 + RUL ≥ 125). Recorded as a correction note in 13.
+- **Defects fixed within M9 (no contract affected):**
+  - `spearmanr` emitted `ConstantInputWarning` on the synthetic fixture (constant last-cycle inputs). Fixed in project code: a guard returns `None` ("undefined") for constant or < 3-point inputs, so no warning filter was added.
+  - The `AnomalyResponse` OpenAPI example carried placeholder numbers; it now shows the recorded engine-34 values.
+  - The dashboard's anomaly table formatted a possibly-null trend median; it now shows "—".
+- The synthetic test fixture lowers the healthy bound to true RUL ≥ 20 (`healthy_min_rul=20`), because synthetic engines live only 50–75 cycles. Real training uses `RUL_CAP`, and a test asserts that training refuses when no healthy rows exist.
+- One existing test changed: `/health` without a model, an exact-body assertion, gained `"anomaly_loaded": false`. All other existing assertions are unchanged.
+- The anomaly metadata records `git_dirty: true` (trained on the uncommitted M9 tree on top of `a25df0e`); its `model_version` is therefore `anomaly-20261108-a25df0e`.
+- Coverage of `src/predmaint`: 95.92 % (from 95.42 %); `models/anomaly.py` 99 %.
+
 ## Measured results
 
 | Item | Value | Source |
@@ -513,3 +571,4 @@ $ pytest -q -m data --no-cov → 12 passed · DATA_DIR=/nonexistent pytest -q �
 | Coverage (after M6) | 94.98 % (gate 85 %) | `pytest -q` |
 | **Final (M7)** | 187 passed, 2 skipped (opt-in); 11 real-data tests passed; coverage 94.98 % (gate 85 %); CI run 42509206610 green (lint-test + docker) | M7 |
 | **M8** | 208 passed, 2 skipped; 12 real-data tests; coverage 95.42 %; intervals CV coverage 0.509 / 0.737 (unclipped / clipped), test 0.740 / 0.820; smoke test exit 0 | M8 |
+| **M9** | 251 passed, 2 skipped; 13 real-data tests; coverage 95.92 %; anomaly trend median 0.680 train OOF (target > 0.7, **not met**), 0.213 test; false-alarm rate 0.0101; detection at median 0.758 of life / 49 cycles RUL; test flags 0.750 (RUL ≤ 20) → 0.000 (> 125); smoke test exit 0 | M9 |

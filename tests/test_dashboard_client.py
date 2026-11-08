@@ -60,11 +60,22 @@ def test_predict_posts_payload() -> None:
 
 
 @pytest.mark.parametrize(
+    ("include_series", "path"), [(False, "/anomaly"), (True, "/anomaly?include_series=true")]
+)
+def test_anomaly_posts_payload(include_series: bool, path: str) -> None:
+    client, session = _client(FakeResponse(200, {"is_anomalous": True}))
+    payload = {"records": [{"cycle": 1}]}
+    assert client.anomaly(payload, include_series=include_series).body == {"is_anomalous": True}
+    assert session.calls[0][:3] == ("POST", f"http://api:8000{path}", payload)
+
+
+@pytest.mark.parametrize(
     ("status", "code"),
     [
         (422, "INSUFFICIENT_CYCLES"),
         (422, "MISSING_SENSORS"),
         (422, "NON_CONSECUTIVE_CYCLES"),
+        (503, "ANOMALY_UNAVAILABLE"),
         (422, "VALIDATION_ERROR"),
         (503, "MODEL_UNAVAILABLE"),
         (404, "NOT_FOUND"),
