@@ -23,7 +23,7 @@ python scripts/train.py --model primary    # → models/primary.*, reports/metri
 python scripts/train.py --select           # → models/model.joblib + model_metadata.json, reports/model_comparison.*
 pytest -q
 python -m predmaint.api.main               # terminal 1: API on $API_HOST:$API_PORT (127.0.0.1:8000)
-streamlit run src/predmaint/dashboard/app.py --server.port 8501  # terminal 2
+streamlit run src/predmaint/dashboard/app.py --server.address localhost --server.port 8501  # terminal 2
 ```
 
 Open http://localhost:8501 (dashboard) and http://localhost:8000/docs (API docs).
@@ -34,7 +34,7 @@ Nothing loads `.env` automatically (no python-dotenv; adding it would need an AD
 
 | Variable | Used by | Default | Compose value |
 |---|---|---|---|
-| `DATA_DIR` | scripts, dashboard | `data` | `/app/data` |
+| `DATA_DIR` | scripts; dashboard (raw FD001 for the explorer/trajectory) | `data` | `/app/data` |
 | `MODEL_DIR` | train script (output dir); API default for `MODEL_PATH` | `models` | `/app/models` |
 | `MODEL_PATH` | API: served model file (metadata `<stem>_metadata.json` beside it) | `$MODEL_DIR/model.joblib` | `/app/models/model.joblib` |
 | `API_HOST` | `python -m predmaint.api.main` | `127.0.0.1` | `0.0.0.0` |
@@ -57,6 +57,8 @@ No secrets exist in the MVP. `.env` is gitignored.
 | `dashboard` | `streamlit run src/predmaint/dashboard/app.py --server.port 8501 --server.address 0.0.0.0` | `8501:8501` | `./data:/app/data:ro` | — ; `depends_on: api` with `condition: service_started` so the dashboard can show "API unavailable" itself |
 
 Note: the dashboard command path requires `src/` to be present in the image (it is copied for the package install).
+
+**Dataset in the dashboard container (M6 requirement):** the Engine explorer and RUL trajectory sections read raw FD001 from `$DATA_DIR/raw/CMAPSSData`. The `dashboard` service therefore needs the dataset, either mounted read-only (`./data:/app/data:ro` after `python scripts/download_data.py` on the host — the planned option) or downloaded at container start. Without it those two sections show the download hint, while the status bar, Upload and Model info keep working (verified by `tests/test_dashboard_app.py`). Inside compose `--server.address` must be `0.0.0.0`; locally use `localhost` (Streamlit's default listens on all interfaces).
 
 **Commands:**
 

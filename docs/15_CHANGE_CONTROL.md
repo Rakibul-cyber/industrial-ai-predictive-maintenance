@@ -84,3 +84,15 @@ Append to the "Change records" section below **before** implementing, and get us
 | Affected docs | 01, 02, 04, 05, 06, 07, 08, 09, 10, 11, 13, 14, README, `.env.example`. |
 | Regression tests | `tests/test_api.py` (health with/without model, `MODEL_PATH` env), `tests/test_real_data.py` (committed examples vs sidecar). |
 | Approval | Requested by the user on 2026-11-08 (M4 authorization). |
+
+### CR-005 — Milestone 5 dashboard specifics (2026-11-08)
+
+| Field | Content |
+|---|---|
+| Reason | Explicit user request (§1.4) in the Milestone 5 authorization. |
+| Evidence | That message: thin `api_client.py` returning typed results (not exceptions); five sections (status, explorer, trajectory, upload, model info); dashboard may import only the data loader and config; late-life example `examples/predict_request_late.json`. 08 had planned `dashboard/client.py` raising `ApiUnavailableError`/`ApiError`. |
+| Impact | 07/08 file names (`api_client.py`, `helpers.py`); 02 §6 flow; 09 M5 tests; the ADR-029 excerpt grows to two test engines (1 and 34). No ADR change; no new dependency (charts use Streamlit's built-in `st.vega_lite_chart`; no Altair import). |
+| Smallest fix | Follow the requested module name and result type; keep display logic in `helpers.py` so it is unit-testable. |
+| Affected docs | 02, 06, 07, 08, 09, 10, 14, README, `.env.example`. |
+| Regression tests | `tests/test_dashboard_client.py`, `tests/test_dashboard_helpers.py`, `tests/test_dashboard_app.py`, `tests/test_real_data.py`. |
+| Approval | Requested by the user on 2026-11-08 (M5 authorization). |

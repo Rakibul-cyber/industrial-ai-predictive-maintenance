@@ -11,7 +11,7 @@ Style: **modular monolith** — one Python package `predmaint` (under `src/`), C
 | Features | `predmaint/features/build.py` | Sensor selection, causal rolling features, "last row per unit" extraction. **Single code path used by training, evaluation and the API.** | Fit models. |
 | Models | `predmaint/models/` | Model definitions (`registry.py`), CV + training (`train.py`), metrics (`metrics.py`), artifact save/load + metadata (`artifacts.py`), inference function (`predict.py`). | Know about HTTP. |
 | API | `predmaint/api/` | FastAPI app (`main.py`), Pydantic schemas (`schemas.py`), model-holder service (`service.py`), error envelope (`errors.py`). | Train models or read raw data files. |
-| Dashboard | `predmaint/dashboard/` | Streamlit UI (`app.py`) and a thin HTTP client (`client.py`). | Import `models/` or compute predictions. |
+| Dashboard | `predmaint/dashboard/` | Streamlit UI (`app.py`), a thin HTTP client returning typed results (`api_client.py`), and display helpers (`helpers.py`: true RUL, request bodies, trajectory sampling). | Import model, feature, inference or API-server code, or compute predictions. |
 | CLI scripts | `scripts/` | Thin entrypoints (`download_data.py`, `train.py`, `make_request_payload.py`) that call package functions. | Contain logic. |
 
 ## 2. Diagram
@@ -65,10 +65,14 @@ The exact contract is in [06](06_API_SPECIFICATION.md); the function-level contr
 
 ## 6. API ↔ dashboard interaction
 
-- Dashboard reads `API_BASE_URL` (default `http://localhost:8000`; `http://api:8000` in compose).
-- On load: `GET /health` (status indicator) and `GET /model/info` (model card).
-- On user action: builds the request from the selected unit's history (FD001 test file under `DATA_DIR`, or an uploaded raw-format file) and calls `POST /predict`; renders the response. Requests use `requests` with a timeout (`API_TIMEOUT_SECONDS`, default 10).
-- The dashboard never imports `predmaint.models`; this is enforced by a test (09, M5).
+Confirmed in M5 (the API server log shows the dashboard's real calls; 14 §M5):
+
+- The dashboard reads `API_BASE_URL` (default `http://localhost:8000`; `http://api:8000` in compose), `API_TIMEOUT_SECONDS` (default 10) and `DATA_DIR`. All HTTP goes through `dashboard/api_client.py` (`requests`). It never raises: each call returns an `ApiResult` with the success body or the docs/06 error envelope unchanged; network failures become a client-side `API_UNREACHABLE` envelope.
+- Every script run calls `GET /health` (status bar) and, if a model is loaded, `GET /model/info` (kept sensors for the chart, health bands, model-info table).
+- **Engine explorer:** the selected engine's first N cycles (raw FD001 under `DATA_DIR`, read with `predmaint.data.load`) become a docs/06 request body; `POST /predict` returns the predicted RUL and status shown in the UI. True RUL is computed locally from the dataset (`helpers.true_rul`).
+- **RUL trajectory:** `POST /predict` every 5 cycles (`TRAJECTORY_STEP`) from cycle 30 to the engine's last cycle, cached with `st.cache_data` keyed by (dataset, unit, step, model_version). A failed call raises, so partial results are never cached.
+- **Upload:** a docs/06 JSON body from the user is posted as-is; the response or error envelope is shown verbatim. This works without the raw dataset.
+- Import boundary: dashboard modules may import only `predmaint.config`, `predmaint.data.load` and `predmaint.dashboard.*` — enforced by `tests/test_dashboard_client.py`.
 
 ## 7. Artifact handling
 

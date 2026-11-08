@@ -2,7 +2,7 @@
 
 Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS **FD001** dataset, served through a FastAPI service and a Streamlit dashboard.
 
-**Status:** Milestones 1–4 implemented: data acquisition & validation, features, Ridge baseline and HistGradientBoosting primary model, CV-based selection, the inference contract, and the FastAPI service. Measured results: [reports/model_comparison.md](reports/model_comparison.md). The dashboard and Docker setup are not built yet. A CI badge will be added once the workflow badge URL is confirmed on `main`. This README is finalised in Milestone 7.
+**Status:** Milestones 1–5 implemented: data acquisition & validation, features, Ridge baseline and HistGradientBoosting primary model, CV-based selection, the inference contract, the FastAPI service and the Streamlit dashboard. Measured results: [reports/model_comparison.md](reports/model_comparison.md). The Docker setup is not built yet. A CI badge will be added once the workflow badge URL is confirmed on `main`. This README is finalised in Milestone 7.
 
 ## What it will do
 
@@ -12,7 +12,7 @@ Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS 
 - Show predictions and sensor trends in a dashboard that gets every result from the API.
 - Run both services with `docker compose up`.
 
-## Quickstart (current: Milestone 4)
+## Quickstart (current: Milestone 5)
 
 Requires Python 3.13 (`python3`) and network access to NASA's S3 bucket.
 
@@ -38,11 +38,37 @@ curl -s localhost:8000/health
 curl -s localhost:8000/model/info
 curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request_min.json
 # → {"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":30,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[]}
+curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request_late.json
+# → predicted_rul 6.3, health_status "critical" (true RUL 7)
 ```
 
-`examples/` holds FD001 test engine 1 (all 31 cycles, and the last 30), with expected results in `examples/expected_predictions.json`. Without a model the API still starts: `/health` reports `"model_loaded": false`, and `/predict` and `/model/info` return 503. Full contract: [docs/06_API_SPECIFICATION.md](docs/06_API_SPECIFICATION.md).
+| Example | Engine | Cycles sent | True RUL | Predicted RUL | Status |
+|---|---|---|---|---|---|
+| `examples/predict_request.json` | FD001 test 1 (early life) | 31 | 112 | 125.0 (cap) | healthy |
+| `examples/predict_request_min.json` | FD001 test 1, last 30 cycles | 30 | 112 | 125.0 (cap) | healthy |
+| `examples/predict_request_late.json` | FD001 test 34 (smallest true RUL) | 203 | 7 | 6.3 | critical |
 
-The dashboard arrives in Milestone 5 ([docs/08_IMPLEMENTATION_PLAN.md](docs/08_IMPLEMENTATION_PLAN.md)).
+`examples/` holds FD001 test engines 1 and 34, with expected results in `examples/expected_predictions.json`. Without a model the API still starts: `/health` reports `"model_loaded": false`, and `/predict` and `/model/info` return 503. Full contract: [docs/06_API_SPECIFICATION.md](docs/06_API_SPECIFICATION.md).
+
+## Run the dashboard
+
+Start the API first (above), then:
+
+```bash
+streamlit run src/predmaint/dashboard/app.py --server.address localhost --server.port 8501   # http://localhost:8501
+```
+
+The dashboard talks only to the API (`API_BASE_URL`, default `http://localhost:8000`). It reads raw FD001 from `DATA_DIR` for display.
+
+- **Status bar:** API reachable, model loaded, model version (from `/health`); a banner and disabled controls when the API is down or degraded.
+- **Engine explorer:** pick a test or train engine and how many cycles have been observed; shows predicted RUL, a coloured health badge, true RUL at that point, and the kept sensors with the current cycle marked.
+- **RUL trajectory:** one click calls `/predict` every 5 cycles across the engine's life and plots predicted vs true RUL, with the health-band thresholds.
+- **Upload:** post a request JSON (e.g. from `examples/`) and see the response or error envelope verbatim. Works without the dataset.
+- **Model info:** served model, selection rule, metrics, window size, cap, health bands, training time and git SHA.
+
+Without the raw dataset, the explorer and trajectory show the download command; the other sections keep working.
+
+Screenshots (added in Milestone 7): `docs/img/dashboard_explorer.png`, `docs/img/dashboard_trajectory.png`, `docs/img/dashboard_upload.png`, `docs/img/dashboard_model_info.png`.
 
 ## Planned stack
 

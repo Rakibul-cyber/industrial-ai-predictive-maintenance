@@ -16,5 +16,14 @@
     "health_status": "healthy",
     "model_version": "primary-20261108-f4c86df",
     "true_rul_at_last_cycle": 112
+  },
+  "predict_request_late.json": {
+    "unit_id": "test-unit-34",
+    "cycles_received": 203,
+    "last_cycle": 203,
+    "predicted_rul": 6.3,
+    "health_status": "critical",
+    "model_version": "primary-20261108-f4c86df",
+    "true_rul_at_last_cycle": 7
   }
 }

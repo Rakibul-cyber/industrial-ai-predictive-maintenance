@@ -74,7 +74,7 @@ Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 {"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":30,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[]}
 ```
 
-The same call with `examples/predict_request.json` (31 records) returns the identical prediction with `"cycles_received":31`. The expected values are recorded in `examples/expected_predictions.json`. Engine 1's true RUL at cycle 31 is 112; with only 31 cycles of early-life history, the model's prediction sits at the 125 cap.
+The same call with `examples/predict_request.json` (31 records) returns the identical prediction with `"cycles_received":31`. The late-life example `examples/predict_request_late.json` (test engine 34, 203 records, true RUL 7) returns `"predicted_rul":6.3,"health_status":"critical"` (sidecar; reproduced through the API by `tests/test_real_data.py` and shown by the dashboard in M5). The expected values are recorded in `examples/expected_predictions.json`. Engine 1's true RUL at cycle 31 is 112; with only 31 cycles of early-life history, the model's prediction sits at the 125 cap.
 
 | Field | Type | Rule |
 |---|---|---|

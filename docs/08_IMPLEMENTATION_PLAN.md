@@ -147,27 +147,31 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** all 06 behaviours tested and passing; curl outputs recorded in 14 and copied into 06; p95 < 200 ms recorded; committed examples reproduce their sidecar through the API.
 - **Estimated effort:** 3 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
 
-## M5 — Streamlit dashboard
+## M5 — Streamlit dashboard (CR-005)
 
-- **Objective:** UI that displays API results only.
+- **Objective:** a UI that shows API results only.
 - **Dependencies:** M4.
 - **Requirements:** FR-014, FR-015, FR-016.
-- **Files to create:** `src/predmaint/dashboard/__init__.py`, `src/predmaint/dashboard/client.py`, `src/predmaint/dashboard/app.py`, `tests/test_dashboard_client.py`.
-- **Files to modify:** `docs/14_PROJECT_STATUS.md`.
+- **Files to create:** `src/predmaint/dashboard/__init__.py`, `api_client.py`, `helpers.py`, `app.py` (under `src/predmaint/dashboard/`), `examples/predict_request_late.json`, `tests/test_dashboard_client.py`, `tests/test_dashboard_helpers.py`, `tests/test_dashboard_app.py`.
+- **Files to modify:** `examples/expected_predictions.json` (late-life entry), `tests/test_real_data.py`, `.env.example`, README, docs 02, 06, 07, 08, 09, 10, 14, 15.
 - **Tasks:**
-  - M5-T1 `client.py`: `ApiClient(base_url, timeout, session=None)` with `health()`, `model_info()`, `predict(unit_id, records)`; raises `ApiUnavailableError` / `ApiError(code, message)`.
-  - M5-T2 `app.py`: status indicator, model card, unit selector (FD001 test file under `DATA_DIR` if present) or upload (raw FD format), prediction panel, sensor trend charts (`st.line_chart`).
-  - M5-T3 Tests: client payload shape; error-envelope parsing; connection error → `ApiUnavailableError` (fake session via monkeypatch); static test that `dashboard/` does not import `predmaint.models`.
+  - [x] M5-T0 `examples/predict_request_late.json` (test engine 34, true RUL 7) via `scripts/make_request_payload.py`, plus its sidecar entry; shown with engine 1 in README.
+  - [x] M5-T1 `api_client.py`: `ApiClient(base_url, timeout, session)` with `health()`, `model_info()`, `predict()` → `ApiResult` (body or envelope unchanged; `API_UNREACHABLE` on network failure; never raises).
+  - [x] M5-T2 `helpers.py`: `true_rul`, `EngineHistory`, `engine_payload`, `trajectory_cycles`, `true_rul_series`, `compute_trajectory`, `sensor_chart_frame`.
+  - [x] M5-T3 `app.py`: status bar; tabs Engine explorer, RUL trajectory (cached per dataset/unit/step/model), Upload, Model info; graceful API-down and dataset-absent behaviour.
+  - [x] M5-T4 Tests: client, helpers, AppTest smoke tests, import boundary, real-data true-RUL vs training labels, late example through the API.
 - **Verification commands:**
 
   ```bash
-  pytest -v tests/test_dashboard_client.py
-  python -m predmaint.api.main &  streamlit run src/predmaint/dashboard/app.py
-  # manual: select unit 1 → prediction equals curl result for the same 30 cycles; stop API → error banner, no crash
+  ruff check . && ruff format --check .
+  pytest -q && pytest -q --cov=predmaint
+  python -m predmaint.api.main &
+  streamlit run src/predmaint/dashboard/app.py --server.address localhost --server.port 8501 &
+  # use the dashboard; confirm POST /predict lines in the API log; then stop both servers
   ```
 
-- **Acceptance criteria:** tests pass; manual check results (incl. API-down behaviour) recorded in 14.
-- **Estimated effort:** 3 h · **Status:** Not started.
+- **Acceptance criteria:** tests pass; the dashboard produced real `/predict` calls visible in the API log; displayed values recorded in 14; API-down and dataset-absent behaviour verified.
+- **Estimated effort:** 3 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
 
 ## M6 — Containerisation
 

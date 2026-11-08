@@ -37,9 +37,10 @@ industrial-ai-predictive-maintenance/
 │   │   ├── schemas.py             #   Pydantic request/response models
 │   │   ├── service.py             #   Model holder, request → predict_rul adapter, demo-payload helpers
 │   │   └── errors.py              #   Error envelope + exception handlers
-│   └── dashboard/                 # UI layer (never imports predmaint.models)
-│       ├── client.py              #   requests-based API client
-│       └── app.py                 #   Streamlit app
+│   └── dashboard/                 # UI layer: talks to the API only (imports config + data.load)
+│       ├── api_client.py          #   requests wrapper → ApiResult (body or docs/06 envelope); never raises
+│       ├── helpers.py             #   true RUL, /predict bodies, trajectory sampling, chart data (no model code)
+│       └── app.py                 #   Streamlit app: status bar + explorer, trajectory, upload, model-info tabs
 ├── scripts/                       # Thin CLI entrypoints only
 │   ├── download_data.py           #   → predmaint.data.download
 │   ├── train.py                   #   → predmaint.models.train
@@ -57,7 +58,9 @@ industrial-ai-predictive-maintenance/
 │   ├── test_selection.py          #   M3
 │   ├── test_inference_contract.py #   M3
 │   ├── test_api.py                #   M4
-│   ├── test_dashboard_client.py   #   M5
+│   ├── test_dashboard_client.py   #   M5: api_client + import boundary
+│   ├── test_dashboard_helpers.py  #   M5: true RUL, payloads, trajectory
+│   ├── test_dashboard_app.py      #   M5: streamlit AppTest smoke tests (API mocked)
 │   └── test_docker_smoke.py       #   M6 (marker: docker)
 ├── data/                          # gitignored except .gitkeep
 │   ├── .gitkeep
@@ -70,9 +73,10 @@ industrial-ai-predictive-maintenance/
 │   ├── primary.joblib             #   per-candidate artifact (M3), gitignored (+ primary_metadata.json)
 │   ├── model.joblib               #   served (selected) model (M3), gitignored
 │   └── model_metadata.json        #   committed with reported results (M7)
-├── examples/                      # committed demo payloads (ADR-029: FD001 test engine 1)
+├── examples/                      # committed demo payloads (ADR-029: FD001 test engines 1 and 34)
 │   ├── predict_request.json       #   all 31 cycles
 │   ├── predict_request_min.json   #   last 30 cycles (= WINDOW_SIZE)
+│   ├── predict_request_late.json  #   FD001 test engine 34 (smallest true RUL, 7), all 203 cycles
 │   └── expected_predictions.json  #   sidecar: expected /predict result + true RUL for each
 ├── reports/                       # small committed metric reports
 │   ├── metrics_baseline.json      #   written by scripts/train.py --model baseline (M2)
@@ -82,4 +86,4 @@ industrial-ai-predictive-maintenance/
 └── docs/                          # 00–15 planning and design documents
 ```
 
-Rules: no notebooks as source of truth; no logic in `scripts/`; `dashboard/` depends only on `client.py`, `requests`, `pandas`, `streamlit`, and `predmaint.data.load` (for parsing local/uploaded raw files).
+Rules: no notebooks as source of truth; no logic in `scripts/`; `dashboard/` depends only on `requests`, `pandas`, `numpy`, `streamlit`, `predmaint.config` and `predmaint.data.load` (tested).

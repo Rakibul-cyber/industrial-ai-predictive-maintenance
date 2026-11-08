@@ -55,7 +55,9 @@ def test_promoted_model_test_rmse_matches_metadata(real_cmapss_dir: Path) -> Non
     assert recomputed == pytest.approx(model.metadata["metrics"]["test"]["rmse"], abs=1e-9)
 
 
-@pytest.mark.parametrize("example", ["predict_request.json", "predict_request_min.json"])
+@pytest.mark.parametrize(
+    "example", ["predict_request.json", "predict_request_min.json", "predict_request_late.json"]
+)
 def test_api_reproduces_committed_example(example: str) -> None:
     """POST a committed demo payload through the API; it must match the recorded sidecar."""
     import json
@@ -75,3 +77,22 @@ def test_api_reproduces_committed_example(example: str) -> None:
         body = client.post("/predict", json=payload).json()
     for key in ("unit_id", "cycles_received", "last_cycle", "predicted_rul", "health_status"):
         assert body[key] == expected[key], key
+
+
+@pytest.mark.parametrize("unit", [1, 39, 69])  # 192, 128 (shortest), 362 (longest) cycles
+def test_dashboard_true_rul_matches_training_labels(real_cmapss_dir: Path, unit: int) -> None:
+    """The dashboard's capped true-RUL series equals the training labels (add_rul) at each
+    sampled cycle; it ends at 0 and starts at min(RUL_CAP, max_cycle - WINDOW_SIZE).
+    add_rul is imported here only — the dashboard itself never imports training code."""
+    from predmaint.config import RUL_CAP, WINDOW_SIZE
+    from predmaint.dashboard.helpers import engine_history, trajectory_cycles, true_rul_series
+    from predmaint.data.labels import add_rul
+
+    data = load_fd001(real_cmapss_dir)
+    history = engine_history(data, "train", unit)
+    cycles = trajectory_cycles(history.last_cycle, WINDOW_SIZE)
+    series = true_rul_series(history, cycles, RUL_CAP)
+    labels = add_rul(data.train[data.train["unit"] == unit], RUL_CAP).set_index("cycle")["rul"]
+    assert series["true_rul_capped"].tolist() == [int(labels[c]) for c in cycles]
+    assert series["true_rul_capped"].iloc[-1] == 0
+    assert series["true_rul_capped"].iloc[0] == min(RUL_CAP, history.last_cycle - WINDOW_SIZE)

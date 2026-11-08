@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **M4 — FastAPI service: complete, awaiting review** |
+| Current milestone | **M5 — Streamlit dashboard: complete, awaiting review** |
 | Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `65db98d` "Implement model selection and promotion (ADR-024)" (M3, committed and pushed by the user, including `models/model_metadata.json`; CI run 42504678999 green), on top of `f4c86df` (M2), `4e8c04c` (M1), `71295ba` (M0). Working tree clean at the start of M4; M4 work is **uncommitted** for review. Remote `origin` = `https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git` (public). |
-| Next approved action | **Await user review of M4** and authorization for Milestone 5 (and, separately, any commit/push of M4). |
+| Git ref | `main` = `origin/main` @ `7d7de29` "feat(api): Implement FastAPI-based predictive maintenance API" (M4, committed and pushed by the user; CI run 42505948636 green, 0 annotations), on top of `65db98d` (M3), `f4c86df` (M2), `4e8c04c` (M1), `71295ba` (M0). Working tree clean at the start of M5; M5 work is **uncommitted** for review. Remote `origin` = `https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git` (public). |
+| Next approved action | **Await user review of M5** and authorization for Milestone 6 (and, separately, any commit/push of M5). |
 
 ## Milestone tracker
 
@@ -15,8 +15,8 @@
 | M1 Scaffold, CI, data | **Accepted** 2026-11-08; committed `4e8c04c`, pushed; CI green | M1 section + CI section below |
 | M2 Labels, features, baseline (re-scoped, CR-002) | **Accepted** 2026-11-08; committed `f4c86df`, pushed; CI green | M2 section below |
 | M3 Primary model, selection, inference contract (CR-003) | **Accepted** 2026-11-08; committed `65db98d`, pushed; CI green (v7 actions, ubuntu-24.04) | M3 section below |
-| M4 API (CR-004) | **Complete** 2026-11-08 (uncommitted, awaiting review) | M4 section below |
-| M5 Dashboard | Not started | — |
+| M4 API (CR-004) | **Accepted** 2026-11-08; committed `7d7de29`, pushed; CI green | M4 section below |
+| M5 Dashboard (CR-005) | **Complete** 2026-11-08 (uncommitted, awaiting review) | M5 section below |
 | M6 Docker | Not started | — |
 | M7 Finalisation | Not started | — |
 
@@ -223,6 +223,60 @@ $ NFR-003: /predict, 30 cycles, 100 in-process calls → p50 10.9 ms, p95 13.6 m
 - Found during M4: nothing reads `.env` (no python-dotenv). README/10 told users to `cp .env.example .env` as if it took effect. Now documented as `set -a; . ./.env; set +a`.
 - The planned M6 compose healthcheck must read `model_loaded` (ADR-028); doc 10 §4 is updated.
 
+## CI — after the M4 push (2026-11-08)
+
+Run [42505948636](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/runs/42505948636) on `7d7de29`: **success**. Job `lint-test` ran on `ubuntu-24.04` from 17:38:16Z to 17:39:04Z; all steps succeeded; 0 annotations.
+
+## M5 — results (2026-11-08, actual command output, trimmed)
+
+**Pre-work:** `examples/predict_request_late.json` = FD001 test engine **34**, the only test engine with the minimum true RUL (7), all 203 cycles, generated with `scripts/make_request_payload.py --unit 34 --out … --expected …`. Sidecar entry: `predicted_rul 6.3`, `critical`, true RUL 7. The existing sidecar entries are unchanged.
+
+**Decisions:** CR-005 (requested `api_client.py` returning typed results instead of 08's planned raising `client.py`; display helpers in `helpers.py`). No new dependency: charts use Streamlit's built-in `st.vega_lite_chart` (cycle marker and band thresholds as rule layers), so no Altair or Plotly import. The documented run command adds `--server.address localhost`, because Streamlit's default listens on all interfaces (observed: the log listed a Network URL and an External URL).
+
+**Files created:** `src/predmaint/dashboard/{__init__,api_client,helpers,app}.py`, `examples/predict_request_late.json`, `tests/test_dashboard_{client,helpers,app}.py`. **Modified:** `examples/expected_predictions.json`, `tests/test_real_data.py`, `.env.example`, README, docs 02, 06, 07, 08, 09, 10, 14, 15.
+
+```text
+$ ruff check .            → All checks passed!
+$ ruff format --check .   → 62 files already formatted
+$ pytest -q               → 181 passed, 1 skipped (network) in 8.18s   (DeprecationWarning still = error; Streamlit needed no filter)
+$ pytest -q --cov=predmaint → dashboard/api_client 100 %, dashboard/helpers 100 % (app.py omitted per NFR-005); TOTAL 95 %
+$ DATA_DIR=/nonexistent MODEL_DIR=/nonexistent pytest -q → 170 passed, 12 skipped (CI-equivalent)
+$ python -m predmaint.api.main &   ;   streamlit run src/predmaint/dashboard/app.py --server.headless true --server.port 8501 &
+  dashboard: "Uvicorn server started on :::8501"; GET /_stcore/health → ok; GET / → HTTP 200
+```
+
+**How the live check was driven — read this:** a headless Chrome load of the page (`--dump-dom`, with `--virtual-time-budget` and with `--timeout`) returned only the page shell; Streamlit's websocket session never ran, so the browser produced **no** API calls. Instead, the real `src/predmaint/dashboard/app.py` was driven with Streamlit's `AppTest` against the **live** API (no mocks: real `requests` calls to 127.0.0.1:8000), selecting engines, moving the slider and clicking "Compute RUL trajectory". No interactive browser session was performed (screenshots are an M7 task).
+
+```text
+AppTest session → status: API reachable yes · model loaded yes · primary-20261108-f4c86df
+test 34 @ N=203:  predicted 6.3   | true 7
+train 1 @ N=30:   predicted 118.2 | true 162 (capped target 125)
+train 1 @ N=100:  predicted 93.0  | true 92
+train 1 @ N=192:  predicted 0.9   | true 0
+trajectory train 1: 34 rows (cycles 30..192)
+ cycle predicted_rul health_status true_rul true_rul_capped
+    30        118.25       healthy      162             125
+    55        125.00       healthy      137             125
+    80        104.56       healthy      112             112
+   105         99.08       healthy       87              87
+   130         76.36       healthy       62              62
+   155         30.62       warning       37              37
+   185          3.88      critical        7               7
+   190          2.56      critical        2               2
+   192          0.90      critical        0               0
+API server log for that session: 44 POST /predict, 10 GET /health, 10 GET /model/info, e.g.
+  18:46:12,007 GET /health 200 10.1ms · 18:46:12,010 GET /model/info 200 1.2ms · 18:46:12,180 POST /predict 200 103.6ms
+  … trajectory burst … 18:46:13,046 POST /predict 200 12.9ms · 18:46:13,065 POST /predict 200 15.2ms · 18:46:13,103 POST /predict 200 14.2ms
+Both servers stopped afterwards (health checks on :8000 and :8501 fail).
+```
+
+**Findings:**
+
+- **Train engine 1 is training data**, so its close numbers (93.0 vs 92 at N=100; 0.9 vs 0 at the end) are in-sample and optimistic. Test engine 34 (6.3 vs 7) is the honest out-of-sample example. The trajectory shape is as expected: it starts near the cap, descends, and crosses warning (< 60) and critical (< 20) near the end.
+- Health status: the API returned `healthy` at train-1 N = 30 and `critical` at N = 185, 190, 192 (trajectory rows above), and `critical` for test 34 (sidecar, reproduced through the API in `test_real_data`). For N = 100 the status was not read back; under ADR-025, 93.0 ≥ 60 means `healthy`.
+- In AppTest, `st.badge` is not exposed as a typed element, so badge text was not read back; status values come from the API responses (trajectory table and sidecar).
+- **M6 note:** the dashboard container needs FD001 under `$DATA_DIR/raw/CMAPSSData` (planned: read-only mount of `./data`) for the explorer and trajectory; status, Upload and Model info work without it (10 §4).
+
 ## Measured results
 
 | Item | Value | Source |
@@ -238,3 +292,5 @@ $ NFR-003: /predict, 30 cycles, 100 in-process calls → p50 10.9 ms, p95 13.6 m
 | Coverage `src/predmaint` | 94 % (747 stmts, 45 missed) | `pytest -q --cov=predmaint` |
 | `/predict` latency (30 cycles, in-process, 100 calls) | p50 10.9 ms, p95 13.6 ms | M4 NFR-003 command |
 | Coverage `src/predmaint` (after M4) | 94 % (971 stmts, 55 missed) | `pytest -q --cov=predmaint` |
+| Late-life example (test 34, 203 cycles) | predicted 6.3 vs true 7 (`critical`) | sidecar + M5 dashboard session |
+| Coverage `src/predmaint` (after M5) | 95 % (1,095 stmts, 55 missed; `dashboard/app.py` omitted) | `pytest -q --cov=predmaint` |
