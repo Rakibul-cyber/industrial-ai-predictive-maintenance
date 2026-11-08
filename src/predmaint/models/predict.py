@@ -109,31 +109,41 @@ def health_status(rul: float, bands: Mapping[str, float] = HEALTH_BANDS) -> Heal
     return "healthy"
 
 
+def _locate(path: Path) -> tuple[Path, str]:
+    """Map a ``.joblib`` file or a directory to ``(directory, artifact name)``."""
+    if path.suffix == ".joblib":
+        return path.parent, path.stem
+    return path, SERVED_ARTIFACT
+
+
 @functools.cache
-def _load_cached(model_dir: Path) -> LoadedModel:
+def _load_cached(target: Path) -> LoadedModel:
+    directory, name = _locate(target)
     try:
-        pipeline, metadata = load_artifacts(model_dir, SERVED_ARTIFACT)
+        pipeline, metadata = load_artifacts(directory, name)
     except FileNotFoundError as exc:
         raise ModelNotAvailableError(str(exc)) from exc
     except Exception as exc:  # corrupt pickle/JSON, schema mismatch, incompatible library
-        raise ModelNotAvailableError(f"could not load model from {model_dir}: {exc}") from exc
+        raise ModelNotAvailableError(f"could not load model from {target}: {exc}") from exc
     for key in ("required_sensors", "feature_names", "config", "model_version"):
         if key not in metadata:
-            raise ModelNotAvailableError(f"{model_dir}: metadata lacks {key!r}")
+            raise ModelNotAvailableError(f"{target}: metadata lacks {key!r}")
     return LoadedModel(pipeline=pipeline, metadata=metadata)
 
 
-def load_model(model_dir: Path | None = None) -> LoadedModel:
-    """Load the served model (``model.joblib`` + ``model_metadata.json``) once and cache it.
+def load_model(model_path: Path | None = None) -> LoadedModel:
+    """Load the served model once per path and cache it.
 
-    ``model_dir`` defaults to ``$MODEL_DIR``. Failed loads are not cached, so a model added
-    later is picked up on the next call; :func:`clear_model_cache` forces a reload.
+    ``model_path`` is the served ``.joblib`` file (its metadata is ``<stem>_metadata.json``
+    beside it) or a directory containing ``model.joblib``; it defaults to ``$MODEL_PATH``
+    (itself defaulting to ``$MODEL_DIR/model.joblib``). Failed loads are not cached, so a
+    model added later is picked up on the next call; :func:`clear_model_cache` forces a reload.
 
     Raises:
         ModelNotAvailableError: if the files are missing or cannot be loaded.
     """
-    directory = (model_dir or get_settings().model_dir).resolve()
-    return _load_cached(directory)
+    target = (model_path or get_settings().model_path).resolve()
+    return _load_cached(target)
 
 
 def clear_model_cache() -> None:

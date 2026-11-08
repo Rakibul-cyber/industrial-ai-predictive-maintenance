@@ -83,6 +83,8 @@ CV: 5-fold GroupKFold by engine, capped labels, std ddof=1. Test: official FD001
 
 **Baseline change since M2 (disclosed):** the M2 run (`ridge-20261108T145035Z`) clamped predictions at 0 only and reported CV RMSE 19.287 ± 1.181, test RMSE 19.205, test MAE 15.403, NASA 595.2. The shared clamp is now `[0, 125]` (ADR-027) and also applies inside CV. One test prediction was 130.58, which accounts for the small improvement. The model itself is unchanged.
 
+**Training cost (NFR-002) on smaller machines:** the primary run measured 80 s wall but ≈ 582 CPU-seconds (≈ 9.7 CPU-minutes: 434 s user + 148 s sys) on an 8-core Apple M1 (4 performance + 4 efficiency cores, `sysctl hw.ncpu` = 8), because HistGradientBoosting uses all cores via OpenMP. **Unmeasured estimate:** wall time should scale roughly with that CPU budget divided by available cores (on the order of 3–5 minutes on 2–4 cores), so NFR-002's < 5-minute wall-time target is not guaranteed on small machines. The baseline is negligible (≈ 1.4 s).
+
 Reproducibility (NFR-001): retraining the primary gave identical metrics and search results and a byte-identical `primary.joblib`. Primary training wall time 76.6–80 s on the Apple-Silicon dev machine (`time`: 434 s user + 148 s sys CPU, i.e. ≈ 9.7 CPU-minutes across cores, because HGB is multi-threaded).
 
 ### 7b. Primary search results (ADR-026)

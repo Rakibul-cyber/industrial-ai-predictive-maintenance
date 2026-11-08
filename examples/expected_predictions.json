@@ -1,0 +1,20 @@
+{
+  "predict_request.json": {
+    "unit_id": "test-unit-1",
+    "cycles_received": 31,
+    "last_cycle": 31,
+    "predicted_rul": 125.0,
+    "health_status": "healthy",
+    "model_version": "primary-20261108-f4c86df",
+    "true_rul_at_last_cycle": 112
+  },
+  "predict_request_min.json": {
+    "unit_id": "test-unit-1",
+    "cycles_received": 30,
+    "last_cycle": 31,
+    "predicted_rul": 125.0,
+    "health_status": "healthy",
+    "model_version": "primary-20261108-f4c86df",
+    "true_rul_at_last_cycle": 112
+  }
+}

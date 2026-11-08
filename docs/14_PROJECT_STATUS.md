@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **M3 — Primary model, selection, served artifact, inference contract: complete, awaiting review** |
+| Current milestone | **M4 — FastAPI service: complete, awaiting review** |
 | Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `f4c86df` "feat: implement feature engineering, model training, and evaluation framework" (M2, committed and pushed by the user; CI run 42492050196 green), on top of `4e8c04c` (M1) and `71295ba` (M0). The working tree was clean at the start of M3; M3 work is **uncommitted** for review. Remote `origin` = `https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git` (public). |
-| Next approved action | **Await user review of M3** and authorization for Milestone 4 (and, separately, any commit/push of M3 — the next push also exercises the updated CI workflow). |
+| Git ref | `main` = `origin/main` @ `65db98d` "Implement model selection and promotion (ADR-024)" (M3, committed and pushed by the user, including `models/model_metadata.json`; CI run 42504678999 green), on top of `f4c86df` (M2), `4e8c04c` (M1), `71295ba` (M0). Working tree clean at the start of M4; M4 work is **uncommitted** for review. Remote `origin` = `https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git` (public). |
+| Next approved action | **Await user review of M4** and authorization for Milestone 5 (and, separately, any commit/push of M4). |
 
 ## Milestone tracker
 
@@ -14,8 +14,8 @@
 | M0 Planning | **Approved** 2026-11-08 (architecture frozen; ADR-001…021 Accepted, ADR-022 added) | M0 section below |
 | M1 Scaffold, CI, data | **Accepted** 2026-11-08; committed `4e8c04c`, pushed; CI green | M1 section + CI section below |
 | M2 Labels, features, baseline (re-scoped, CR-002) | **Accepted** 2026-11-08; committed `f4c86df`, pushed; CI green | M2 section below |
-| M3 Primary model, selection, inference contract (CR-003) | **Complete** 2026-11-08 (uncommitted, awaiting review) | M3 section below |
-| M4 API | Not started | — |
+| M3 Primary model, selection, inference contract (CR-003) | **Accepted** 2026-11-08; committed `65db98d`, pushed; CI green (v7 actions, ubuntu-24.04) | M3 section below |
+| M4 API (CR-004) | **Complete** 2026-11-08 (uncommitted, awaiting review) | M4 section below |
 | M5 Dashboard | Not started | — |
 | M6 Docker | Not started | — |
 | M7 Finalisation | Not started | — |
@@ -178,6 +178,51 @@ $ ls -l models/*.joblib
 - **Artifact size for M6-T4:** the served `model.joblib` is 451,385 bytes (≈ 441 KiB) and the baseline 5,297 bytes. Committing the served model is size-viable (well under typical repo limits, no Git LFS needed). The remaining M6 considerations are sklearn-version coupling of the pickle and keeping the committed file in sync with `model_metadata.json`.
 - The inference contract checks cycle order **as given** (out-of-order input raises rather than being sorted); doc 06 §3.3 is updated accordingly.
 
+## CI — after the M3 push (2026-11-08)
+
+Run [42504678999](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/runs/42504678999) on `65db98d`: **success**. Job `lint-test` ran on label `ubuntu-24.04` from 17:22:53Z to 17:23:28Z. Steps `Run actions/checkout@v7` and `Run actions/setup-python@v7`, install, ruff lint, ruff format check and tests all succeeded. **0 annotations**, so the Node 20 deprecation warning seen on v4/v5 is gone. The CI housekeeping is verified.
+
+## M4 — results (2026-11-08, actual command output, trimmed)
+
+**Decisions:** CR-004; ADR-028 (`/health` always 200, readiness via `model_loaded`; amends ADR-022); ADR-029 (commit FD001 test engine 1 as demo payloads; exception to ADR-003). The request keeps 06's field names `unit_id`/`records` (06 is explicit, so `engine_id` was not adopted). New env vars `MODEL_PATH`, `API_HOST`, `API_PORT`. No new dependencies.
+
+**Housekeeping:** 05 §7a now states the training cost next to NFR-002: 80 s wall, ≈ 582 CPU-s (≈ 9.7 CPU-min) on an 8-core Apple M1 (`sysctl hw.ncpu` = 8, 4P + 4E), with an explicitly unmeasured estimate for smaller machines.
+
+**Files created:** `src/predmaint/api/{__init__,main,schemas,service,errors}.py`, `scripts/make_request_payload.py`, `examples/{predict_request,predict_request_min,expected_predictions}.json`, `tests/test_api.py`. **Modified:** `src/predmaint/config.py`, `src/predmaint/models/predict.py`, `tests/test_real_data.py`, `.env.example`, README, docs 01, 02, 04, 05, 06, 07, 08, 09, 10, 11, 13, 14, 15.
+
+```text
+$ ruff check .            → All checks passed!
+$ ruff format --check .   → 55 files already formatted
+$ pytest -q               → 152 passed, 1 skipped (network) in 7.41s
+$ pytest -q --cov=predmaint → api/errors 97 %, api/main 91 %, api/schemas 100 %, api/service 96 %; TOTAL 94 %
+$ DATA_DIR=/nonexistent MODEL_DIR=/nonexistent pytest -q → 145 passed, 8 skipped (CI-equivalent)
+$ python -m predmaint.api.main     (log: "Loaded model primary-20261108-f4c86df from models/model.joblib")
+$ curl -s localhost:8000/health
+{"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.1.0"}
+$ curl -s localhost:8000/model/info   → model_name primary, selected_by cv_rmse, n_features 43, window_size 30, rul_cap 125,
+  test rmse 16.609852374016835, cv rmse_mean 16.558936995946503, sklearn_version_match true (full body in 06 §4.1)
+$ curl -s -X POST localhost:8000/predict -d @examples/predict_request.json
+{"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":31,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[]}
+$ curl -s -X POST localhost:8000/predict -d @examples/predict_request_min.json
+{"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":30,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[]}
+$ (bad) first 10 cycles → {"error":{"code":"INSUFFICIENT_CYCLES","message":"10 cycles received; at least 30 are required","details":[]}}  HTTP 422
+server log: "GET /health 200 2.2ms", "GET /model/info 200 0.8ms", "POST /predict 200 35.3ms", "POST /predict 200 11.8ms", "POST /predict 422 1.3ms"; server stopped (port 8000 free afterwards)
+$ MODEL_PATH=/nonexistent python -m predmaint.api.main
+  log: WARNING predmaint.api: Model not available, serving in degraded mode: artifact not found: /nonexistent/model.joblib …
+$ curl -s localhost:8000/health → {"status":"degraded","model_loaded":false,"model_version":null,"api_version":"0.1.0"}  HTTP 200
+$ curl -s -X POST localhost:8000/predict -d @examples/predict_request_min.json
+{"error":{"code":"MODEL_UNAVAILABLE","message":"No model loaded from /nonexistent: artifact not found: /nonexistent/model.joblib (run `python scripts/train.py`)","details":[]}}  HTTP 503
+$ curl -s localhost:8000/model/info → same MODEL_UNAVAILABLE envelope, HTTP 503; server stopped
+$ NFR-003: /predict, 30 cycles, 100 in-process calls → p50 10.9 ms, p95 13.6 ms
+```
+
+**Findings:**
+
+- Engine 1 (31 cycles, true RUL 112) predicts 125.0, the cap. It is early-life, so the demo is honest but shows the clamp. Both example files give the same prediction, as expected, because only the last 30 cycles are used.
+- Fixed during M4: `/model/info` returned `health_bands` as floats (`20.0`) because of a `dict[str, float]` schema; changed to `int`.
+- Found during M4: nothing reads `.env` (no python-dotenv). README/10 told users to `cp .env.example .env` as if it took effect. Now documented as `set -a; . ./.env; set +a`.
+- The planned M6 compose healthcheck must read `model_loaded` (ADR-028); doc 10 §4 is updated.
+
 ## Measured results
 
 | Item | Value | Source |
@@ -191,3 +236,5 @@ $ ls -l models/*.joblib
 | Baseline training wall time | 1.4 s total | M2 |
 | Artifact sizes | `model.joblib` / `primary.joblib` 451,385 B; `baseline.joblib` 5,297 B | `ls -l models/*.joblib` |
 | Coverage `src/predmaint` | 94 % (747 stmts, 45 missed) | `pytest -q --cov=predmaint` |
+| `/predict` latency (30 cycles, in-process, 100 calls) | p50 10.9 ms, p95 13.6 ms | M4 NFR-003 command |
+| Coverage `src/predmaint` (after M4) | 94 % (971 stmts, 55 missed) | `pytest -q --cov=predmaint` |

@@ -145,6 +145,7 @@ Value-range checks: physical ranges are not documented by the source, so no hard
 - Outcome: no licence found on either page; the citation request is honoured in README; the no-redistribution policy below stays in force.
 - Policy regardless of outcome: raw data is **never committed** (`data/*` gitignored); users download it from NASA via the script; README cites the PCoE dataset citation above and the Saxena et al. (2008) paper.
 - Test fixtures are **synthetic** (generated in `tests/conftest.py`), not excerpts of NASA files.
+- **Exception (ADR-029, user-directed, M4):** `examples/predict_request.json` and `examples/predict_request_min.json` contain FD001 test engine 1 (31 rows, 26 fields each, as JSON) so the README, tests and dashboard have a real, checkable demo payload. This is the only committed excerpt; no full file or other engine is committed. The dataset citation in README/§11 applies.
 
 ## 12. Verified vs UNVERIFIED summary
 

@@ -72,3 +72,15 @@ Append to the "Change records" section below **before** implementing, and get us
 | Affected docs | 00, 01, 02, 04, 05, 06, 07, 08, 09, 11, 12, 13, 14, CLAUDE.md, README. |
 | Regression tests | `tests/test_selection.py`, `tests/test_inference_contract.py`, primary tests in `tests/test_train.py`, `tests/test_real_data.py` promoted-model RMSE. |
 | Approval | Requested by the user on 2026-11-08 (M3 authorization). |
+
+### CR-004 — Milestone 4 API amendments (2026-11-08)
+
+| Field | Content |
+|---|---|
+| Reason | Explicit user request (§1.4) in the Milestone 4 authorization. |
+| Evidence | That message: `/health` → 200 with `model_loaded: false` when `MODEL_PATH` points nowhere; env vars `MODEL_PATH`, `API_HOST`, `API_PORT`, `LOG_LEVEL`; `/health` fields incl. `api_version`; `/model/info` incl. `n_features`; committed real-data examples from FD001 test engine 1 with a sidecar of expected predictions. |
+| Impact | ADR-028 (amends ADR-022: `/health` status code), ADR-029 (exception to ADR-003's no-redistribution policy). Additions not contradicting 06: `MODEL_PATH`/`API_HOST`/`API_PORT` env vars (10 §3), `n_features` + `api_version` fields. Planned compose healthcheck now reads `model_loaded`. The request keeps 06's field names (`unit_id`, `records`) rather than `engine_id`, because 06 is not silent on them. |
+| Smallest fix | New ADRs; `Settings.model_path/api_host/api_port`; `load_model` accepts a `.joblib` path; docs updated. |
+| Affected docs | 01, 02, 04, 05, 06, 07, 08, 09, 10, 11, 13, 14, README, `.env.example`. |
+| Regression tests | `tests/test_api.py` (health with/without model, `MODEL_PATH` env), `tests/test_real_data.py` (committed examples vs sidecar). |
+| Approval | Requested by the user on 2026-11-08 (M4 authorization). |

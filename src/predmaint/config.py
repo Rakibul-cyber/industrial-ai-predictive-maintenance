@@ -24,7 +24,10 @@ _DEFAULTS: Final = MappingProxyType(
     {
         "DATA_DIR": "data",
         "MODEL_DIR": "models",
+        "MODEL_PATH": "",  # empty → $MODEL_DIR/model.joblib
         "LOG_LEVEL": "INFO",
+        "API_HOST": "127.0.0.1",
+        "API_PORT": "8000",
         "API_BASE_URL": "http://localhost:8000",
         "API_TIMEOUT_SECONDS": "10",
     }
@@ -37,7 +40,10 @@ class Settings:
 
     data_dir: Path
     model_dir: Path
+    model_path: Path
     log_level: str
+    api_host: str
+    api_port: int
     api_base_url: str
     api_timeout_seconds: float
 
@@ -61,7 +67,8 @@ def get_settings() -> Settings:
     """Read settings from environment variables, falling back to documented defaults.
 
     Raises:
-        ValueError: if ``API_TIMEOUT_SECONDS`` is not a positive number.
+        ValueError: if ``API_TIMEOUT_SECONDS`` is not a positive number or ``API_PORT`` is not
+            an integer in 1-65535.
     """
     raw_timeout = _env("API_TIMEOUT_SECONDS")
     try:
@@ -70,10 +77,17 @@ def get_settings() -> Settings:
         raise ValueError(f"API_TIMEOUT_SECONDS must be a number, got {raw_timeout!r}") from exc
     if timeout <= 0:
         raise ValueError(f"API_TIMEOUT_SECONDS must be positive, got {timeout}")
+    raw_port = _env("API_PORT")
+    if not raw_port.isdigit() or not 1 <= int(raw_port) <= 65535:
+        raise ValueError(f"API_PORT must be an integer in 1-65535, got {raw_port!r}")
+    model_dir = Path(_env("MODEL_DIR"))
     return Settings(
         data_dir=Path(_env("DATA_DIR")),
-        model_dir=Path(_env("MODEL_DIR")),
+        model_dir=model_dir,
+        model_path=Path(_env("MODEL_PATH") or model_dir / "model.joblib"),
         log_level=_env("LOG_LEVEL").upper(),
+        api_host=_env("API_HOST"),
+        api_port=int(raw_port),
         api_base_url=_env("API_BASE_URL").rstrip("/"),
         api_timeout_seconds=timeout,
     )

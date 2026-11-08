@@ -33,9 +33,9 @@ industrial-ai-predictive-maintenance/
 │   │   ├── selection.py           #   ADR-024 selection + promotion to model.joblib, comparison reports (M3)
 │   │   └── predict.py             #   inference contract: load_model, predict_rul, health_status, errors
 │   ├── api/                       # HTTP serving layer
-│   │   ├── main.py                #   FastAPI app, lifespan model loading, routes
+│   │   ├── main.py                #   create_app(), lifespan model loading, routes, request logging; `python -m predmaint.api.main`
 │   │   ├── schemas.py             #   Pydantic request/response models
-│   │   ├── service.py             #   Model holder + request → predict_rul adapter
+│   │   ├── service.py             #   Model holder, request → predict_rul adapter, demo-payload helpers
 │   │   └── errors.py              #   Error envelope + exception handlers
 │   └── dashboard/                 # UI layer (never imports predmaint.models)
 │       ├── client.py              #   requests-based API client
@@ -70,6 +70,10 @@ industrial-ai-predictive-maintenance/
 │   ├── primary.joblib             #   per-candidate artifact (M3), gitignored (+ primary_metadata.json)
 │   ├── model.joblib               #   served (selected) model (M3), gitignored
 │   └── model_metadata.json        #   committed with reported results (M7)
+├── examples/                      # committed demo payloads (ADR-029: FD001 test engine 1)
+│   ├── predict_request.json       #   all 31 cycles
+│   ├── predict_request_min.json   #   last 30 cycles (= WINDOW_SIZE)
+│   └── expected_predictions.json  #   sidecar: expected /predict result + true RUL for each
 ├── reports/                       # small committed metric reports
 │   ├── metrics_baseline.json      #   written by scripts/train.py --model baseline (M2)
 │   ├── metrics_primary.json       #   written by scripts/train.py --model primary (M3)

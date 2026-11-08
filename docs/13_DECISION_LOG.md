@@ -25,12 +25,14 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-019 | Modular monolith, package `predmaint` | Accepted (2026-11-08) |
 | ADR-020 | Generic sensor names | Accepted (2026-11-08) |
 | ADR-021 | Synthetic fixtures for CI; real-data tests gated | Accepted (2026-11-08) |
-| ADR-022 | 503 without artifact; demo = train command + `docker compose up` | Accepted (2026-11-08) |
+| ADR-022 | 503 without artifact; demo = train command + `docker compose up` | Accepted (2026-11-08); `/health` part amended by ADR-028 |
 | ADR-023 | M2/M3 re-scope; per-candidate artifacts; feature list inside the pipeline | Accepted (2026-11-08, user-directed) |
 | ADR-024 | Served model selected by CV RMSE (tie-break CV MAE) | Accepted (2026-11-08, user-directed) |
 | ADR-025 | Health status thresholds 20 / 60 | Accepted (2026-11-08, user-directed) |
 | ADR-026 | One bounded 12-configuration search for the primary model | Accepted (2026-11-08, user-directed) |
 | ADR-027 | Clamp predictions to [0, RUL_CAP] | Accepted (2026-11-08, user-directed) |
+| ADR-028 | `/health` always 200; readiness via `model_loaded` (amends ADR-022) | Accepted (2026-11-08, user-directed) |
+| ADR-029 | Commit one FD001 test engine as demo payloads (exception to ADR-003 policy) | Accepted (2026-11-08, user-directed) |
 
 ---
 
@@ -228,3 +230,19 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Decision:** `predict_from_features(pipeline, features, rul_cap)` clips to `[0, rul_cap]`; it is used by CV, test evaluation and `predict_rul`.
 - **Rationale:** training labels never exceed `rul_cap`, so predictions above it are extrapolation; one shared clamp keeps offline and online numbers identical.
 - **Consequences:** baseline numbers changed slightly versus M2 (test RMSE 19.205 → 19.144; one test prediction was 130.58), disclosed in 05 §7a.
+
+### ADR-028 — `/health` always 200; readiness via `model_loaded` (amends ADR-022)
+
+- **Context:** ADR-022 / doc 06 said `/health` returns 503 without a model. The M4 authorization (2026-11-08) specifies `/health` → 200 with `model_loaded: false` when `MODEL_PATH` points nowhere (CR-004).
+- **Decision:** `/health` always returns 200 with `status` (`ok`/`degraded`), `model_loaded`, `model_version` (null without a model) and `api_version`. `/predict` and `/model/info` keep returning 503 `MODEL_UNAVAILABLE` without a model (the rest of ADR-022 is unchanged).
+- **Alternatives:** keep 503 on `/health` (readiness-style).
+- **Rationale:** separates liveness (process up) from readiness (`model_loaded`), and the dashboard can show "API up, no model".
+- **Consequences:** readiness checks must read `model_loaded`. The planned compose healthcheck (10 §4) is changed accordingly — a status-code-only check would report healthy without a model. 01 FR-010, 02 §8, 06, 10, 11 AC-21 updated.
+
+### ADR-029 — Commit one FD001 test engine as demo payloads (exception to the ADR-003 policy)
+
+- **Context:** ADR-003 / 04 §11: raw data never committed, test fixtures synthetic. The M4 authorization asks for `examples/predict_request.json` from real FD001 test engine 1 (all cycles) and `examples/predict_request_min.json` (30 cycles), committed and reused by README, tests and the dashboard. NASA states no licence for the dataset and requests citation (04 §11).
+- **Decision:** commit exactly those two payloads (31 and 30 rows of engine 1, JSON) plus `examples/expected_predictions.json`. No other NASA rows are committed; `data/` stays ignored; the citation stays in README.
+- **Alternatives:** synthetic demo payloads (not "real"); generate at runtime from the downloaded data (demo unusable without the dataset).
+- **Rationale:** a small, attributed excerpt makes the demo checkable without downloading the dataset.
+- **Consequences:** R1 (licence) now also covers this excerpt; if NASA terms ever forbid redistribution, remove `examples/*.json` and regenerate locally with `scripts/make_request_payload.py`.

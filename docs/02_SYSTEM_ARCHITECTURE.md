@@ -81,7 +81,7 @@ The exact contract is in [06](06_API_SPECIFICATION.md); the function-level contr
 
 | Failure | Behaviour |
 |---|---|
-| Artifact or metadata missing/corrupt at startup | API still starts; logs the error; `/health` → 503 `MODEL_UNAVAILABLE`; `/predict`, `/model/info` → 503. Compose healthcheck stays unhealthy. |
+| Artifact or metadata missing/corrupt at startup | API still starts; logs a WARNING; `/health` → 200 with `model_loaded: false` (ADR-028); `/predict`, `/model/info` → 503 `MODEL_UNAVAILABLE`. Compose healthcheck stays unhealthy. |
 | Invalid request body | 422 `VALIDATION_ERROR` with field-level details. |
 | Business-rule violation | 422 with `INSUFFICIENT_CYCLES`, `MISSING_SENSORS`, or `NON_CONSECUTIVE_CYCLES`. |
 | Values outside training range | 200 with entries in `warnings` (not rejected). |

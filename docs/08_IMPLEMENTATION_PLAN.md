@@ -102,36 +102,39 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** both candidates have CV and official-test MAE/RMSE/NASA from actual runs (05 §7a, 14); the served model follows ADR-024; a repeat primary run gives identical metrics; primary training < 5 min wall; `model.joblib` + `model_metadata.json` include `model_name`, `selected_by`, `model_version`, `comparison`; all tests pass, including real-data tests locally.
 - **Estimated effort:** 5 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
 
-## M4 — FastAPI service
+## M4 — FastAPI service (CR-004)
 
-- **Objective:** serve real predictions per [06](06_API_SPECIFICATION.md).
+- **Objective:** serve real predictions per [06](06_API_SPECIFICATION.md) through the M3 inference contract.
 - **Dependencies:** M3.
 - **Requirements:** FR-010, FR-011, FR-012, FR-013, NFR-003, NFR-010.
-- **Files to create:** `src/predmaint/api/__init__.py`, `main.py`, `schemas.py`, `service.py`, `errors.py` (under `src/predmaint/api/`), `scripts/make_request_payload.py`, `tests/test_api.py`.
-- **Files to modify:** `docs/14_PROJECT_STATUS.md`.
+- **Files to create:** `src/predmaint/api/__init__.py`, `main.py`, `schemas.py`, `service.py`, `errors.py` (under `src/predmaint/api/`), `scripts/make_request_payload.py`, `examples/predict_request.json`, `examples/predict_request_min.json`, `examples/expected_predictions.json`, `tests/test_api.py`.
+- **Files to modify:** `src/predmaint/config.py` (`MODEL_PATH`, `API_HOST`, `API_PORT`), `src/predmaint/models/predict.py` (`load_model` accepts a `.joblib` path, default `$MODEL_PATH`), `tests/test_real_data.py`, `.env.example`, README, docs 01, 02, 04, 05, 06, 07, 08, 09, 10, 11, 13, 14, 15.
 - **Tasks:**
-  - M4-T1 Schemas per 06 §3–4 (`extra="forbid"`, `allow_inf_nan=False`).
-  - M4-T2 Lifespan loading from `MODEL_DIR`; degraded mode on failure (02 §8).
-  - M4-T3 Routes + error envelope handlers for every code in 06 §6.
-  - M4-T4 `make_request_payload.py`.
-  - M4-T5 Tests (TestClient via httpx2): each endpoint happy path; each error code; NaN/Infinity rejected; extra field rejected; 503 when `MODEL_DIR` empty; API prediction == `predict_rul` for the same input.
+  - [x] M4-T1 Schemas per 06 §3–4 (`extra="forbid"`, `allow_inf_nan=False`, ≤ 1000 records, OpenAPI examples).
+  - [x] M4-T2 `create_app()` with a lifespan that loads the model once; degraded mode on `ModelNotAvailableError` (ADR-022/028).
+  - [x] M4-T3 Routes + one error-handler layer for every code in 06 §6; per-request log line; 500 without traceback.
+  - [x] M4-T4 `make_request_payload.py` + committed examples and sidecar (ADR-029).
+  - [x] M4-T5 Tests (TestClient via httpx2, synthetic served model): every endpoint, every error code, validation envelope, 404/405, 503, `MODEL_PATH` env, logging, OpenAPI metadata; real-data example test.
+  - [x] M4-T6 Housekeeping: CPU-seconds note next to NFR-002 in 05 §7a; CI result for `65db98d` recorded in 14.
 - **Verification commands:**
 
   ```bash
-  pytest -v tests/test_api.py
-  uvicorn predmaint.api.main:app --port 8000 &   # then:
+  ruff check . && ruff format --check .
+  pytest -q && pytest -q --cov=predmaint
+  python -m predmaint.api.main &
   curl -s localhost:8000/health
   curl -s localhost:8000/model/info
-  python scripts/make_request_payload.py --unit 1 --last 30 > /tmp/payload.json
-  curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @/tmp/payload.json
+  curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request.json
+  curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request_min.json
+  # deliberately bad: 10 cycles → 422 INSUFFICIENT_CYCLES; then restart with MODEL_PATH=/nonexistent → /health 200 degraded, /predict 503
   kill %1
   # NFR-003 latency (in-process, 100 sequential calls):
   python - <<'EOF'
   import json, statistics, time
   from fastapi.testclient import TestClient
-  from predmaint.api.main import app
-  payload = json.load(open("/tmp/payload.json"))
-  with TestClient(app) as client:
+  from predmaint.api.main import create_app
+  payload = json.load(open("examples/predict_request_min.json"))
+  with TestClient(create_app()) as client:
       times = []
       for _ in range(100):
           start = time.perf_counter()
@@ -141,8 +144,8 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
   EOF
   ```
 
-- **Acceptance criteria:** all 06 behaviours tested and passing; curl outputs recorded in 14; p95 < 200 ms recorded.
-- **Estimated effort:** 3 h · **Status:** Not started.
+- **Acceptance criteria:** all 06 behaviours tested and passing; curl outputs recorded in 14 and copied into 06; p95 < 200 ms recorded; committed examples reproduce their sidecar through the API.
+- **Estimated effort:** 3 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
 
 ## M5 — Streamlit dashboard
 
@@ -159,7 +162,7 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 
   ```bash
   pytest -v tests/test_dashboard_client.py
-  uvicorn predmaint.api.main:app --port 8000 &  streamlit run src/predmaint/dashboard/app.py
+  python -m predmaint.api.main &  streamlit run src/predmaint/dashboard/app.py
   # manual: select unit 1 → prediction equals curl result for the same 30 cycles; stop API → error banner, no crash
   ```
 

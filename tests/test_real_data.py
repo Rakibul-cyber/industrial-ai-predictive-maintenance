@@ -53,3 +53,25 @@ def test_promoted_model_test_rmse_matches_metadata(real_cmapss_dir: Path) -> Non
     ]
     recomputed = rmse(data.rul["rul"].to_numpy(dtype=float), predictions)
     assert recomputed == pytest.approx(model.metadata["metrics"]["test"]["rmse"], abs=1e-9)
+
+
+@pytest.mark.parametrize("example", ["predict_request.json", "predict_request_min.json"])
+def test_api_reproduces_committed_example(example: str) -> None:
+    """POST a committed demo payload through the API; it must match the recorded sidecar."""
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from predmaint.api.main import create_app
+
+    model_path = get_settings().model_path
+    if not model_path.is_file():
+        pytest.skip(f"no served model at {model_path} (run scripts/train.py --select)")
+    examples = Path("examples")
+    payload = json.loads((examples / example).read_text())
+    expected = json.loads((examples / "expected_predictions.json").read_text())[example]
+    clear_model_cache()
+    with TestClient(create_app(model_path=model_path)) as client:
+        body = client.post("/predict", json=payload).json()
+    for key in ("unit_id", "cycles_received", "last_cycle", "predicted_rul", "health_status"):
+        assert body[key] == expected[key], key
