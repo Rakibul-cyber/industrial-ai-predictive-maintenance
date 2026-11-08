@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **MVP COMPLETE** — M0–M7 complete (2026-11-08). M7 work is uncommitted, awaiting the user's final commit. |
+| Current milestone | **MVP COMPLETE** — M0–M7 complete (2026-11-08); post-MVP change **CR-007** (project rename) applied, uncommitted, awaiting review. |
 | Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `ccf68a7` "feat: Finalize acceptance criteria, risk register, and decision log for M6; commit model artifact" (M6, includes the committed `models/model.joblib`). Final CI run [42509206610](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/runs/42509206610): **success** (`lint-test` + `docker`). |
-| Next approved action | The user reviews and makes the final commit of M7; adds the four screenshots under `docs/img/`. Any further work goes through change control (15) as a newly authorized milestone (candidates in CLAUDE.md). |
+| Git ref | `main` = `origin/main` @ `32fdae0` "feat: Finalize M7 deliverables, including risk register, project status, and evaluation report" (M7, committed and pushed by the user). CR-007 edits are uncommitted. |
+| Next approved action | The user reviews and commits CR-007; adds the four screenshots under `docs/img/`. Any further work goes through change control (15). |
 
 ## Milestone tracker
 
@@ -417,6 +417,30 @@ $ pytest -q -m data --no-cov → 11 passed   ·   pip check → No broken requir
 | 10 | Primary training CPU cost on small machines unmeasured | Low | Documented (05 §7a) |
 
 **Blockers:** none.
+
+## CR-007 — project renamed (2026-11-08, post-MVP change control)
+
+Title changed from "Industrial AI — Predictive Maintenance & Anomaly Detection Platform" to **"Industrial AI — Predictive Maintenance Platform"** (ADR-033). Naming only: no code, API, model, test or dependency change. The FastAPI title "Predictive Maintenance — RUL API", the Streamlit titles and the `pyproject.toml` description never contained the old title or an anomaly claim, so they were left unchanged.
+
+**Before:** 10 `anomaly` occurrences; one title (`docs/00:3`) and one justification of the overstated title (`docs/00:44`). **Edited:** doc 00 (title; line 44 rewritten as "planned extension, NOT IMPLEMENTED and not authorized"), CLAUDE.md (candidate list labelled NOT IMPLEMENTED), doc 13 (ADR-033; ADR-001 naming consequence marked superseded), doc 15 (CR-007), doc 14.
+
+**Regression:** `ruff check .` → All checks passed! · `ruff format --check .` → 66 files already formatted · `pytest -q` → Required test coverage of 85% reached. Total coverage: 94.98% · 187 passed, 2 skipped.
+
+**Final `git grep -n -i "anomaly"`, with each remaining occurrence classified:**
+
+| Location | Classification |
+|---|---|
+| `CLAUDE.md:52` | Scope restriction: "No anomaly detection … unless approved" |
+| `CLAUDE.md:76` | Candidate next milestone, under "NOT IMPLEMENTED, NOT authorized" |
+| `README.md:149` | "Candidate next steps, **not implemented**" |
+| `docs/00:44` | Out-of-scope list: "planned extension, NOT IMPLEMENTED and not authorized" |
+| `docs/12:19` | R13 scope-creep risk example (implies not implemented) |
+| `docs/13:39`, `:279–283` | ADR-033 table row and record of the rename |
+| `docs/13:45–47` | Historical ADR-001 text (out of scope; ADR-001 naming consequence superseded by ADR-033) |
+| `docs/15:112–117` | CR-007 change record quoting the old title as evidence |
+| `docs/16:96` | Row in "Optional extensions — NOT IMPLEMENTED" |
+
+No occurrence implies the feature exists. None appear in `src/`, `tests/` or `scripts/`.
 
 ## Measured results
 

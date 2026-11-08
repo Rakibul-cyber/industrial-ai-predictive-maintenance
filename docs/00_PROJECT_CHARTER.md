@@ -1,6 +1,6 @@
 # 00 — Project Charter
 
-**Project:** Industrial AI — Predictive Maintenance & Anomaly Detection Platform
+**Project:** Industrial AI — Predictive Maintenance Platform (renamed by CR-007 / ADR-033)
 **Owner:** MD Rakibul Hassan · **Charter date:** 2026-11-08 · **Phase:** Milestone 0 (planning)
 
 ## 1. Problem statement
@@ -41,7 +41,7 @@ works end to end, and all acceptance criteria in [11](11_ACCEPTANCE_CRITERIA.md)
 ## 6. Out of scope (MVP)
 
 - Subsets FD002–FD004 (multiple operating conditions / fault modes).
-- Anomaly-detection models (the project name reflects the platform direction; MVP delivers RUL only — see ADR-001).
+- Anomaly-detection models — planned extension, **NOT IMPLEMENTED** and not authorized (the MVP delivers RUL prediction only; see ADR-001, ADR-033).
 - Deep learning / sequence models (LSTM, CNN, Transformers).
 - Hyperparameter search beyond the single bounded 12-configuration search of the primary model (ADR-026).
 - Cloud deployment, Kubernetes, authentication, multi-tenancy.

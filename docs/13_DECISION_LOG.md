@@ -4,7 +4,7 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 
 | ID | Title | Status |
 |---|---|---|
-| ADR-001 | MVP scope: FD001 RUL regression only | Accepted (2026-11-08) |
+| ADR-001 | MVP scope: FD001 RUL regression only | Accepted (2026-11-08); naming consequence superseded by ADR-033 |
 | ADR-002 | Python 3.13 | Accepted (2026-11-08) |
 | ADR-003 | Data source, checksums, no redistribution | Accepted (2026-11-08) |
 | ADR-004 | RUL target with clip 125 | Accepted (2026-11-08) |
@@ -36,6 +36,7 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-030 | Commit the served model artifact | Accepted (2026-11-08, user-directed) |
 | ADR-031 | Dataset in containers: `./data` bind mount, dashboard downloads on first start | Accepted (2026-11-08, user-directed) |
 | ADR-032 | One image (single stage, digest-pinned, model baked in), two compose services | Accepted (2026-11-08, user-directed) |
+| ADR-033 | Project renamed "Industrial AI — Predictive Maintenance Platform"; anomaly detection stays an unauthorized extension | Accepted (2026-11-08, user-directed, CR-007) |
 
 ---
 
@@ -274,3 +275,10 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Evidence:** image 1.1 GB on disk (`docker images`), 242,889,009 bytes content size; build 57 s cold on arm64.
 - **Alternatives:** two slim images (smaller API image, two builds); keep the `./models` mount (retrain without rebuild, but the image is not self-contained).
 - **Consequences:** retraining requires `docker compose up --build`; the API image carries Streamlit/pyarrow (size).
+
+### ADR-033 — Project renamed; anomaly detection remains an unauthorized extension (supersedes ADR-001's naming consequence)
+
+- **Context:** CR-007. The original title "Industrial AI — Predictive Maintenance & Anomaly Detection Platform" (doc 00) names a capability that was never implemented. ADR-001 scoped the MVP to RUL regression and noted that the "name reflects platform direction"; for a portfolio project, a title that overstates scope is a credibility defect.
+- **Decision:** the project is named **"Industrial AI — Predictive Maintenance Platform"**. Anomaly detection remains an optional, **unauthorized** extension, mentioned only as planned / NOT IMPLEMENTED (doc 00 out-of-scope list, CLAUDE.md candidate milestones, 16 §8, README "Limitations and future work").
+- **Alternatives:** implement anomaly detection (scope creep, R13); keep the old title with a disclaimer (still misleading at a glance).
+- **Consequences:** naming only; no code, API, model or test change (the code titles never contained the old title). ADR-001's scope decision stands; only its naming consequence is superseded.

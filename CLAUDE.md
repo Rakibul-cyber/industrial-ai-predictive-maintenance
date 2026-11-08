@@ -68,7 +68,7 @@ FD001 only. No anomaly detection, other subsets, deep learning, hyperparameter s
 
 All milestones M0–M7 are complete (docs/08, docs/14). The MVP is frozen: **any further work, including fixes, goes through change control (docs/15)** and needs explicit user authorization as a new milestone.
 
-Candidate next milestones (**NOT authorized**; details in docs/16 §8):
+Candidate next milestones (**NOT IMPLEMENTED, NOT authorized**; details in docs/16 §8):
 
 - FD002–FD004 support (per-regime normalisation, regime-aware features)
 - Prediction intervals (quantile boosting or conformal prediction)

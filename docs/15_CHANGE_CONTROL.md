@@ -108,3 +108,15 @@ Append to the "Change records" section below **before** implementing, and get us
 | Affected docs | README, 10, 14. |
 | Regression tests | Existing `tests/test_model_artifact.py` (unchanged). Re-run in the fresh clone: corrected Option B → `187 passed, 2 skipped`; retrain + sidecar refresh → `187 passed, 2 skipped`. |
 | Approval | Documentation defect fix within the authorized milestone (M7). |
+
+### CR-007 — Project title overstated scope: remove the unimplemented "Anomaly Detection" claim (2026-11-08)
+
+| Field | Content |
+|---|---|
+| Reason | Credibility defect (§1.2) and explicit user request (§1.4): the title "Industrial AI — Predictive Maintenance & Anomaly Detection Platform" names a capability that is not implemented. Anomaly detection was an optional extension in doc 00 and was never authorized. |
+| Evidence | `git grep -n -i "anomaly"` on `32fdae0` → 10 occurrences, none in `src/`, `tests/`, `scripts/`, the API or requirements (01). The only title occurrence is `docs/00_PROJECT_CHARTER.md:3`, plus a justification of that title at `docs/00:44`. The code titles (FastAPI "Predictive Maintenance — RUL API", Streamlit "Predictive Maintenance — RUL", `pyproject.toml` description) contain neither the old title nor an anomaly claim. |
+| Impact | Naming only. No behaviour, API contract, model, test or dependency change. |
+| Smallest fix | Rename to "Industrial AI — Predictive Maintenance Platform" in doc 00 (the only remaining old-title occurrence; README and doc 17 already use the new title). Rewrite doc 00's justification as a planned extension labelled NOT IMPLEMENTED. Label CLAUDE.md's candidate list NOT IMPLEMENTED. Keep the honest "planned/not implemented" mentions in README, doc 12, doc 13 (historical ADR-001 text) and doc 16 §8. Code strings unchanged because none overstated scope. ADR-033 records the rename. |
+| Affected docs | 00, 13, 14, 15, CLAUDE.md. |
+| Regression tests | Full `pytest -q`, `ruff check .`, `ruff format --check .`; no test change needed (`tests/test_api.py` asserts only `"RUL" in title`). |
+| Approval | Requested by the user on 2026-11-08 (CR-007). |
