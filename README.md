@@ -2,7 +2,7 @@
 
 Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS **FD001** dataset, served through a FastAPI service and a Streamlit dashboard.
 
-**Status:** Planning complete (Milestone 0) — no application code yet. CI badge will be added once the GitHub Actions workflow (Milestone 1) has run on `main`. This README is finalised in Milestone 7.
+**Status:** Milestone 1 (data acquisition & validation) implemented; no model, API, or dashboard yet. A CI badge will be added once the GitHub Actions workflow has run on `main`. This README is finalised in Milestone 7.
 
 ## What it will do
 
@@ -11,6 +11,22 @@ Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS 
 - Serve predictions via `POST /predict` (plus `/health`, `/model/info`).
 - Show predictions and sensor trends in a dashboard that gets every result from the API.
 - Run both services with `docker compose up`.
+
+## Quickstart (current: Milestone 1)
+
+Requires Python 3.13 (`python3`) and network access to NASA's S3 bucket.
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt && pip install -e .
+cp .env.example .env                 # optional; defaults work without it
+python scripts/download_data.py      # downloads ~12 MB, verifies SHA-256, extracts to data/raw/CMAPSSData/
+python -m predmaint.data.validate    # checks the FD001 data contract (docs/04 §6)
+ruff check . && ruff format --check .
+pytest -q                            # real-data tests run when data/raw/ is present
+```
+
+Training, the API, and the dashboard arrive in Milestones 3–5 ([docs/08_IMPLEMENTATION_PLAN.md](docs/08_IMPLEMENTATION_PLAN.md)).
 
 ## Planned stack
 
@@ -22,4 +38,4 @@ Start with [docs/00_PROJECT_CHARTER.md](docs/00_PROJECT_CHARTER.md); current sta
 
 ## Data source
 
-NASA Prognostics Center of Excellence Data Repository — "Turbofan Engine Degradation Simulation Data Set". Reference: A. Saxena, K. Goebel, D. Simon, N. Eklund, "Damage Propagation Modeling for Aircraft Engine Run-to-Failure Simulation", PHM08, 2008. The data is not redistributed in this repository; it is downloaded by script (see [docs/04_DATASET_SPECIFICATION.md](docs/04_DATASET_SPECIFICATION.md)).
+NASA Prognostics Center of Excellence Data Repository. Dataset citation (as requested by the repository): A. Saxena and K. Goebel (2008). "Turbofan Engine Degradation Simulation Data Set", NASA Prognostics Data Repository, NASA Ames Research Center, Moffett Field, CA. Paper: A. Saxena, K. Goebel, D. Simon, N. Eklund, "Damage Propagation Modeling for Aircraft Engine Run-to-Failure Simulation", PHM08, 2008. No licence is stated by NASA for this dataset. The data is not redistributed in this repository; it is downloaded by script (see [docs/04_DATASET_SPECIFICATION.md](docs/04_DATASET_SPECIFICATION.md)).

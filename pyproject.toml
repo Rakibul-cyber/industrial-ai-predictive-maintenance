@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "predmaint"
+dynamic = ["version"]
+description = "RUL prediction on NASA C-MAPSS FD001 with a FastAPI service and a Streamlit dashboard."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+# Dependencies are pinned in requirements.txt / requirements-dev.txt only (docs/03 §3).
+
+[tool.setuptools.dynamic]
+version = { attr = "predmaint.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "data: needs the real FD001 files under DATA_DIR (skipped when absent)",
+    "network: downloads from the NASA S3 URL (runs only with RUN_NETWORK_TESTS=1)",
+    "docker: needs Docker Compose (runs only with RUN_DOCKER_TESTS=1)",
+]
+filterwarnings = ["error::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["predmaint"]
+omit = ["*/predmaint/dashboard/app.py"]

@@ -25,7 +25,8 @@ Framework: pytest 9.2.0 + pytest-cov 7.1.0; API tests via `fastapi.testclient.Te
 - `data`: auto-skip if `DATA_DIR/raw/CMAPSSData/train_FD001.txt` is absent. Must **run (not skip)** locally for M1, M3, M7 sign-off.
 - `network`: skip unless `RUN_NETWORK_TESTS=1`.
 - `docker`: skip unless `RUN_DOCKER_TESTS=1`.
-- Warnings: `filterwarnings = error::DeprecationWarning` for first-party code so deprecations (like the httpx one found in M0) fail fast.
+- Warnings: `filterwarnings = ["error::DeprecationWarning"]` (all modules) in `pyproject.toml`. The M1 suite is clean under it (48 passed, no warnings). If a future third-party deprecation forces a narrower filter, record why via 15.
+- Download tests use a local stdlib HTTP server (no internet); only the `network` test touches NASA S3. CI does **not** download the dataset (ADR-021).
 
 ## 4. Required passing tests per milestone (cumulative)
 

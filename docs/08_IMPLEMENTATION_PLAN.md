@@ -23,20 +23,21 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Files to create:** `pyproject.toml`, `requirements.txt`, `requirements-dev.txt`, `.env.example`, `.github/workflows/ci.yml`, `models/.gitkeep`, `src/predmaint/__init__.py`, `src/predmaint/config.py`, `src/predmaint/data/__init__.py`, `src/predmaint/data/download.py`, `src/predmaint/data/load.py`, `src/predmaint/data/validate.py`, `scripts/download_data.py`, `tests/conftest.py`, `tests/test_download.py`, `tests/test_load.py`, `tests/test_validate.py`, `tests/test_real_data.py`.
 - **Files to modify:** `docs/04_DATASET_SPECIFICATION.md` (§11 licence outcome), `docs/14_PROJECT_STATUS.md`, `docs/13_DECISION_LOG.md` (if any decision changes).
 - **Tasks:**
-  - M1-T1 Write `pyproject.toml` (src layout, `requires-python = ">=3.13,<3.14"`, ruff config, pytest markers `data`/`network`/`docker`) and the two requirements files with the exact pins from [03](03_TECH_STACK.md).
-  - M1-T2 `config.py`: `DATA_DIR`, `MODEL_DIR`, `RUL_CAP=125`, `WINDOW_SIZE=30`, `RANDOM_SEED=42`, `CV_FOLDS=5`, band thresholds; env overrides for paths, `LOG_LEVEL`, `API_BASE_URL`, `API_TIMEOUT_SECONDS`.
-  - M1-T3 `download.py`: URL + SHA-256 constants from 04 §1/§3; skip download if valid files exist; nested extraction restricted to the 14 expected names.
-  - M1-T4 `load.py`: `sep=r"\s+"`, `header=None`, names per 04 §4; int casts for `unit`, `cycle`.
-  - M1-T5 `validate.py`: checks 1–6 of 04 §6, raising `DataValidationError` with a specific message.
-  - M1-T6 Tests: synthetic fixtures incl. trailing double spaces; every validation rule has a failing-case test; real-data shape test (marker `data`); live download test (marker `network`).
-  - M1-T7 CI workflow (ubuntu-latest, `actions/setup-python` with `python-version: "3.13"`, install dev deps, `ruff check .`, `ruff format --check .`, `pytest`). **UNVERIFIED item:** runner provides Python 3.13 — confirmed on the first CI run, which requires a user-authorized push.
-  - M1-T8 **UNVERIFIED item — dataset licence:** read the NASA PCoE repository page and data.nasa.gov entry for usage/citation terms; record exact wording + URL in 04 §11; if no terms are found, record that and keep the no-redistribution policy.
-  - M1-T9 **Re-verify pins in project context:** fresh `.venv` from `requirements-dev.txt`, `pip check`, import smoke.
+  - [x] M1-T1 Write `pyproject.toml` (src layout, `requires-python = ">=3.13,<3.14"`, ruff config, pytest markers `data`/`network`/`docker`) and the two requirements files with the exact pins from [03](03_TECH_STACK.md).
+  - [x] M1-T2 `config.py`: `DATA_DIR`, `MODEL_DIR`, `RUL_CAP=125`, `WINDOW_SIZE=30`, `RANDOM_SEED=42`, `CV_FOLDS=5`, band thresholds; env overrides for paths, `LOG_LEVEL`, `API_BASE_URL`, `API_TIMEOUT_SECONDS`.
+  - [x] M1-T3 `download.py`: URL + SHA-256 constants from 04 §1/§3; skip download if valid files exist; nested extraction restricted to the 14 expected names.
+  - [x] M1-T4 `load.py`: `sep=r"\s+"`, `header=None`, names per 04 §4; int casts for `unit`, `cycle`.
+  - [x] M1-T5 `validate.py`: checks 1–6 of 04 §6, raising `DataValidationError` with a specific message.
+  - [x] M1-T6 Tests: synthetic fixtures incl. trailing double spaces; every validation rule has a failing-case test; real-data shape test (marker `data`); live download test (marker `network`).
+  - [x] M1-T7 (workflow file done; first run pending an authorized push) CI workflow (ubuntu-latest, `actions/setup-python` with `python-version: "3.13"`, install dev deps, `ruff check .`, `ruff format --check .`, `pytest`). **UNVERIFIED item:** runner provides Python 3.13 — confirmed on the first CI run, which requires a user-authorized push.
+  - [x] M1-T8 **UNVERIFIED item — dataset licence:** read the NASA PCoE repository page and data.nasa.gov entry for usage/citation terms; record exact wording + URL in 04 §11; if no terms are found, record that and keep the no-redistribution policy.
+  - [x] M1-T9 **Re-verify pins in project context:** fresh `.venv` from `requirements-dev.txt`, `pip check`, import smoke.
 - **Verification commands:**
 
   ```bash
   python scripts/download_data.py && python scripts/download_data.py   # 2nd run: no download
   shasum -a 256 data/raw/CMAPSSData/{train,test,RUL}_FD001.txt
+  python -m predmaint.data.validate                                     # full FD001 contract check
   pip check
   ruff check . && ruff format --check .
   pytest -v
@@ -44,7 +45,7 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
   ```
 
 - **Acceptance criteria:** checksums match 04 §3; all tests pass (real-data test executed, not skipped, locally); ruff clean; `pip check` clean; licence outcome recorded; CI workflow file present (CI run result recorded in 14 once a push is authorized).
-- **Estimated effort:** 4 h · **Status:** In progress.
+- **Estimated effort:** 4 h · **Status:** Complete 2026-11-08 (awaiting user review; uncommitted). Evidence in 14. CI run itself pending an authorized push (U5).
 
 ## M2 — Labels and feature engineering
 

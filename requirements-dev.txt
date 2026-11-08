@@ -1,0 +1,6 @@
+# Development and test dependencies (docs/03_TECH_STACK.md). httpx2 replaces httpx per ADR-013.
+-r requirements.txt
+httpx2==2.16.0
+pytest==9.2.0
+pytest-cov==7.1.0
+ruff==0.17.4

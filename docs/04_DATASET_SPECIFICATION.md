@@ -110,11 +110,12 @@ Value-range checks: physical ranges are not documented by the source, so no hard
 ## 11. Licensing and redistribution
 
 - data.nasa.gov catalog page states: **"License not specified"** (observed in page HTML).
-- Usage terms on the PCoE repository page: **UNVERIFIED** (not inspected beyond the link). Resolved in M1 (task M1-T8).
-- Policy regardless of outcome: raw data is **never committed** (`data/*` gitignored); users download it from NASA via the script; README cites the Saxena et al. (2008) reference and NASA PCoE as source.
+- PCoE repository page (checked 2026-11-08, M1-T8): **no licence is stated**. Exact wording: "Publications making use of databases obtained from this repository are requested to acknowledge both the assistance received by using this repository and the donators of the data." Dataset citation given there: *A. Saxena and K. Goebel (2008). "Turbofan Engine Degradation Simulation Data Set", NASA Prognostics Data Repository, NASA Ames Research Center, Moffett Field, CA.*
+- Outcome: no licence found on either page; the citation request is honoured in README; the no-redistribution policy below stays in force.
+- Policy regardless of outcome: raw data is **never committed** (`data/*` gitignored); users download it from NASA via the script; README cites the PCoE dataset citation above and the Saxena et al. (2008) paper.
 - Test fixtures are **synthetic** (generated in `tests/conftest.py`), not excerpts of NASA files.
 
 ## 12. Verified vs UNVERIFIED summary
 
-**Verified:** archive URL + size + checksums; nested-zip structure; 14 member files; FD001 shapes, nulls, unit ids, cycle monotonicity, test min length 31, RUL range; whitespace/trailing-space format; readme semantics of RUL; NASA scoring formula text (05 §7).
-**UNVERIFIED:** dataset licence/usage terms (M1-T8, R1); third-party mirror availability (R1); column → physical-sensor-name mapping (ADR-020, not needed); which sensors are near-constant (determined in M2, M2-T1).
+**Verified:** archive URL + size + checksums; nested-zip structure; 14 member files; FD001 shapes, nulls, unit ids, cycle monotonicity, test min length 31, RUL range; whitespace/trailing-space format; readme semantics of RUL; NASA scoring formula text (05 §7); licence status (none stated) and citation request (§11, M1); download script re-verified all checksums end-to-end in M1.
+**UNVERIFIED:** third-party mirror availability (R1); column → physical-sensor-name mapping (ADR-020, not needed); which sensors are near-constant (determined in M2, M2-T1).

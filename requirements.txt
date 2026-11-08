@@ -1,0 +1,10 @@
+# Runtime dependencies — exact pins verified on Python 3.13 in Milestone 0 (docs/03_TECH_STACK.md).
+fastapi==0.162.2
+joblib==1.6.0
+numpy==2.5.4
+pandas==3.1.1
+pydantic==2.14.3
+requests==2.34.2
+scikit-learn==1.9.1
+streamlit==1.67.0
+uvicorn==0.54.0

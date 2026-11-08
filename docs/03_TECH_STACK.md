@@ -23,7 +23,7 @@ All versions below were **confirmed on 2026-11-08** in a throwaway venv (`.venv-
 | ASGI server | uvicorn | `0.54.0` | Standard FastAPI server. |
 | Schemas | pydantic (v2) | `2.14.3` | FastAPI's validation layer; `allow_inf_nan=False`, `extra="forbid"`. |
 | Dashboard | streamlit | `1.67.0` | Fast UI for a data app (ADR-014). |
-| Dashboard HTTP client | requests | `2.34.2` | Already a declared dependency of streamlit 1.67.0 (`pip show streamlit`), so no new dependency; pinned explicitly because we import it. |
+| HTTP client (dashboard + dataset download) | requests | `2.34.2` | Already a declared dependency of streamlit 1.67.0 (`pip show streamlit`), so no new dependency; pinned explicitly because we import it. Also used by `data/download.py` because stdlib `urllib` fails TLS verification on python.org macOS builds (CR-001). |
 | Test runner | pytest | `9.2.0` | Standard. |
 | Coverage | pytest-cov | `7.1.0` | NFR-005 measurement. |
 | API test transport | **httpx2** | `2.16.0` | See ADR-013: with starlette 1.10.0, `fastapi.testclient` + `httpx` emits `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead.` With httpx2 installed, TestClient imported `httpx2` (not `httpx`) and a `/health` call returned 200 under `-W error`. |
