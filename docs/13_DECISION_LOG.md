@@ -10,23 +10,27 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-004 | RUL target with clip 125 | Accepted (2026-11-08) |
 | ADR-005 | Feature strategy | Accepted (2026-11-08) |
 | ADR-006 | Baseline: StandardScaler + Ridge | Accepted (2026-11-08) |
-| ADR-007 | Primary: HistGradientBoostingRegressor (LightGBM rejected) | Accepted (2026-11-08) |
+| ADR-007 | Primary: HistGradientBoostingRegressor (LightGBM rejected) | Accepted (2026-11-08); "no tuning" amended by ADR-026 |
 | ADR-008 | Validation protocol and metrics | Accepted (2026-11-08) |
 | ADR-009 | NASA score coefficient interpretation | Accepted (2026-11-08) |
-| ADR-010 | Model selection rule | Accepted (2026-11-08) |
+| ADR-010 | Model selection rule | Superseded by ADR-024 |
 | ADR-011 | Artifacts: joblib + metadata JSON; no MLflow | Accepted (2026-11-08) |
 | ADR-012 | Backend: FastAPI + Pydantic v2 + uvicorn | Accepted (2026-11-08) |
 | ADR-013 | httpx2 instead of httpx for TestClient | Accepted (2026-11-08) |
 | ADR-014 | Frontend: Streamlit + requests over HTTP | Accepted (2026-11-08) |
 | ADR-015 | Packaging: one image, two compose services, mounted artifacts | Accepted (2026-11-08) |
 | ADR-016 | Tooling: ruff, exact pins, pytest, CI from M1 | Accepted (2026-11-08) |
-| ADR-017 | Health band thresholds | Accepted (2026-11-08) |
-| ADR-018 | Clamp predictions at 0 | Accepted (2026-11-08) |
+| ADR-017 | Health band thresholds | Superseded by ADR-025 |
+| ADR-018 | Clamp predictions at 0 | Superseded by ADR-027 |
 | ADR-019 | Modular monolith, package `predmaint` | Accepted (2026-11-08) |
 | ADR-020 | Generic sensor names | Accepted (2026-11-08) |
 | ADR-021 | Synthetic fixtures for CI; real-data tests gated | Accepted (2026-11-08) |
 | ADR-022 | 503 without artifact; demo = train command + `docker compose up` | Accepted (2026-11-08) |
 | ADR-023 | M2/M3 re-scope; per-candidate artifacts; feature list inside the pipeline | Accepted (2026-11-08, user-directed) |
+| ADR-024 | Served model selected by CV RMSE (tie-break CV MAE) | Accepted (2026-11-08, user-directed) |
+| ADR-025 | Health status thresholds 20 / 60 | Accepted (2026-11-08, user-directed) |
+| ADR-026 | One bounded 12-configuration search for the primary model | Accepted (2026-11-08, user-directed) |
+| ADR-027 | Clamp predictions to [0, RUL_CAP] | Accepted (2026-11-08, user-directed) |
 
 ---
 
@@ -101,7 +105,7 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Rationale:** matches the stated intent and figure.
 - **Consequences:** secondary metric only; R5 tracks the ambiguity.
 
-### ADR-010 — Model selection rule
+### ADR-010 — Model selection rule (Superseded by ADR-024)
 
 - **Decision:** ship the primary model only if both its test MAE and test RMSE are lower than the baseline's; otherwise ship the baseline.
 - **Alternatives:** select on CV only; select on NASA score.
@@ -151,13 +155,13 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Rationale:** every subsequent milestone is gated by lint + tests from the start.
 - **Consequences:** CI results depend on user-authorized pushes (R11).
 
-### ADR-017 — Health band thresholds
+### ADR-017 — Health band thresholds (Superseded by ADR-025)
 
 - **Decision:** `CRITICAL` < 30 cycles, `WARNING` 30–< 80, `HEALTHY` ≥ 80; stored in config and metadata.
 - **Rationale:** illustrative maintenance-planning bands within the 0–125 prediction range; not derived from engineering limits (stated in 05 §11).
 - **Consequences:** configurable without retraining logic changes.
 
-### ADR-018 — Clamp predictions at 0
+### ADR-018 — Clamp predictions at 0 (Superseded by ADR-027)
 
 - **Decision:** `predicted_rul = max(prediction, 0)` in `predict_rul`, used by both evaluation and API.
 - **Rationale:** negative RUL is meaningless; one shared clamp keeps offline and online numbers identical.
@@ -194,3 +198,33 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Alternatives:** keep the original milestone split; pickle a custom wrapper object holding the sensor list (adds a project class to the pickle contract).
 - **Rationale:** follows the user's explicit instruction; built-in sklearn components only; the served-model contract (05 §9, 06) is unchanged.
 - **Consequences:** `reports/` directory added (07); `models/*_metadata.json` ignored except `model_metadata.json`; 01/08/09 traceability updated.
+
+### ADR-024 — Served model selected by CV RMSE (supersedes ADR-010)
+
+- **Context:** ADR-010 selected on official test MAE and RMSE, which uses the held-out test set for a model decision. The M3 authorization (2026-11-08) replaced it (CR-003).
+- **Decision:** the served model is the candidate with the lowest 5-fold GroupKFold CV RMSE mean. Tie-breaks: CV MAE mean, then the simpler model. Official test metrics (unclipped truth primary, clipped secondary) and the NASA score are reported for every candidate but do not drive the choice. A test ranking that disagrees with the CV ranking is stated explicitly, and the CV choice stands. Candidates must share data hashes, config, feature names and kept sensors.
+- **Alternatives:** ADR-010 (test-based); NASA score (secondary metric only, ADR-009).
+- **Rationale:** keeps the official test set a clean held-out report.
+- **Consequences:** `scripts/train.py --select`; promoted metadata carries `selected_by: "cv_rmse"` and a `comparison` block; `reports/model_comparison.{json,md}`. M3 outcome: primary selected, rankings agree (05 §7c).
+
+### ADR-025 — Health status thresholds (supersedes ADR-017)
+
+- **Context:** user-specified bands for the API/dashboard (2026-11-08).
+- **Decision:** `HEALTH_BANDS = {"critical_below": 20, "warning_below": 60}` in `config.py`. Predicted RUL < 20 → `"critical"`, 20 ≤ RUL < 60 → `"warning"`, ≥ 60 → `"healthy"`. The response field is `health_status` (lowercase values).
+- **Alternatives:** ADR-017's 30 / 80 uppercase bands. No documented reason was found to deviate from the user's numbers.
+- **Consequences:** 05 §10, 06 §3.4 updated; illustrative thresholds, not engineering limits.
+
+### ADR-026 — One bounded search for the primary model (amends ADR-007)
+
+- **Context:** ADR-007 fixed HGB hyperparameters with no tuning. The M3 authorization allowed one bounded search of at most ~12 configurations scored by GroupKFold CV RMSE, with no second round (CR-003).
+- **Decision:** exactly 12 configurations — (learning_rate, max_iter) ∈ {(0.1, 100), (0.05, 200), (0.03, 400)} × max_leaf_nodes ∈ {15, 31} × l2_regularization ∈ {0.0, 1.0}. `early_stopping=False` and `random_state=42` throughout; no scaler. Winner = lowest CV RMSE mean (tie-break CV MAE). The grid, every result and the winner go into metadata and doc 05 §7b.
+- **Alternatives:** varying early stopping — rejected because its internal validation split is row-wise and leaks across engines (ADR-007 rationale).
+- **Rationale:** a small, pre-registered search; no test-set involvement.
+- **Consequences:** primary training ≈ 80 s wall (≈ 9.7 CPU-minutes multi-threaded) on the dev machine; winner `lr=0.05, max_iter=200, max_leaf_nodes=15, l2=0.0`. No further tuning is permitted without a new ADR.
+
+### ADR-027 — Clamp predictions to [0, RUL_CAP] (supersedes ADR-018)
+
+- **Context:** the M3 inference spec requires `predicted_rul` to be non-negative and capped at `RUL_CAP`. ADR-018 clamped at 0 only. Offline evaluation and inference must share one post-processing step.
+- **Decision:** `predict_from_features(pipeline, features, rul_cap)` clips to `[0, rul_cap]`; it is used by CV, test evaluation and `predict_rul`.
+- **Rationale:** training labels never exceed `rul_cap`, so predictions above it are extrapolation; one shared clamp keeps offline and online numbers identical.
+- **Consequences:** baseline numbers changed slightly versus M2 (test RMSE 19.205 → 19.144; one test prediction was 130.58), disclosed in 05 §7a.

@@ -118,7 +118,7 @@ Value-range checks: physical ranges are not documented by the source, so no hard
 
 - Model selection & diagnostics: 5-fold **GroupKFold by `unit`** on `train_FD001` (no unit in both train and validation folds).
 - Final evaluation: official `test_FD001` + `RUL_FD001`, one prediction per unit at its last cycle (100 predictions).
-- The test set is never used for fitting, feature selection, or hyperparameter choice. It is used once per candidate for the ADR-010 selection between exactly two pre-specified models (limitation noted in 05 §11).
+- The test set is never used for fitting, feature selection, or hyperparameter choice. It is used only for reporting; model selection uses CV (ADR-024), not the test set. Historical note — the original plan used it for the ADR-010 selection between exactly two pre-specified models (limitation noted in 05 §11).
 
 ## 9. Leakage risks and controls
 

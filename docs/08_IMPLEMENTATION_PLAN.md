@@ -72,33 +72,35 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** all tests pass (real-data tests executed locally); sensor table recorded in 04 from real data; feature count = 1 + 3 × len(kept sensors); baseline CV and official-test MAE/RMSE/NASA score from an actual run recorded in 05 §7a and 14; `reports/metrics_baseline.json` written.
 - **Estimated effort:** 5 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
 
-## M3 — Training, evaluation, artifacts, inference contract
+## M3 — Primary model, selection, served artifact, inference contract (CR-003)
 
-- **Objective:** real CV and test metrics for both models; selected artifact + metadata; shared inference function.
+- **Objective:** a tuned-once primary model, CV-based selection and promotion of the served artifact, and the inference contract the API will call.
 - **Dependencies:** M2.
 - **Requirements:** FR-007, FR-008 (primary), FR-009, NFR-001, NFR-002.
-- **Files to create:** `reports/metrics_primary.json` (generated), `tests/test_inference_contract.py`.
-- **Files to extend (created in M2):** `src/predmaint/models/registry.py` (`make_primary`), `train.py` (primary candidate, ADR-010 selection, served `model.joblib` + `model_metadata.json`), `predict.py` (full inference contract), `tests/test_train.py`.
-- **Files to modify:** `tests/conftest.py` (tiny-model fixture), `docs/14_PROJECT_STATUS.md` (actual metrics, runtime), `docs/05_ML_DESIGN.md` only if a documented detail proves wrong (via 15).
+- **Files to create:** `src/predmaint/models/selection.py`, `reports/metrics_primary.json`, `reports/model_comparison.json`, `reports/model_comparison.md` (generated, committed), `tests/test_selection.py`, `tests/test_inference_contract.py`.
+- **Files to modify:** `src/predmaint/config.py` (ADR-025 bands), `src/predmaint/models/registry.py` (`make_primary`, `PRIMARY_SEARCH_GRID`), `train.py` (search, `--select`), `predict.py` (inference contract, shared clamp), `scripts/train.py` (usage), `tests/conftest.py` (session-scoped served-model fixture), `tests/test_train.py`, `tests/test_real_data.py`, `.github/workflows/ci.yml` (v7 actions, `ubuntu-24.04`), `reports/metrics_baseline.json` (re-measured), README, CLAUDE.md, docs 00, 01, 02, 04, 05, 06, 07, 08, 09, 11, 12, 13, 14, 15.
 - **Tasks:**
-  - M3-T1 `registry.py`: `make_baseline()`, `make_primary(seed)` per 05 §2–3.
-  - M3-T2 `metrics.py`: `mae`, `rmse`, `nasa_score` (05 §7, ADR-009).
-  - M3-T3 `train.py`: checksum gate, CV (GroupKFold 5 by unit), final fit, test evaluation at last cycle, ADR-010 selection, metadata assembly.
-  - M3-T4 `artifacts.py`: `save_artifacts`, `load_artifacts` with schema-version check.
-  - M3-T5 `predict.py`: inference contract (05 §10) incl. typed errors, clamp, bands, range warnings.
-  - M3-T6 `scripts/train.py`: thin CLI (`--model-dir`, `--data-dir`), prints metrics table.
-  - M3-T7 Tests: metric known values (incl. NASA `d=10`, `d=-13`); GroupKFold folds have disjoint units; training smoke on synthetic data writes artifact with all metadata keys; contract: loaded model + required columns → float ≥ 0; each typed error raised; offline test-set prediction for a unit equals `predict_rul` on that unit's history.
+  - [x] M3-T1 Record CR-003 / ADR-024 (CV-based selection), ADR-025 (bands), ADR-026 (bounded search), ADR-027 (clamp to [0, RUL_CAP]).
+  - [x] M3-T2 CI housekeeping: `actions/checkout@v7`, `actions/setup-python@v7` (both `node24`), `runs-on: ubuntu-24.04`; YAML parsed and validated locally.
+  - [x] M3-T3 `registry.py`: `make_primary` + 12-configuration `PRIMARY_SEARCH_GRID`; `train.py`: `search_primary` (GroupKFold CV RMSE, tie-break MAE), grid/results/winner in metadata and report.
+  - [x] M3-T4 `selection.py`: compatibility check, ADR-024 choice, disagreement flag, promotion to `model.joblib` + `model_metadata.json`, `reports/model_comparison.{json,md}`; `scripts/train.py --select`.
+  - [x] M3-T5 `predict.py`: `load_model` (cached, `ModelNotAvailableError`), `predict_rul` (typed errors, last-window-only, clamp, ADR-025 status, range warnings), shared `predict_from_features`.
+  - [x] M3-T6 Tests: primary train/save/reload/predict + reproducibility; selection cases (primary wins, baseline wins, disagreement, tie-breaks, promotion, incompatible/missing); inference contract; real-data promoted-model RMSE.
 - **Verification commands:**
 
   ```bash
-  time python scripts/train.py
-  python -c "import json;m=json.load(open('models/model_metadata.json'));print(m['selected'],m['metrics']['baseline']['test'],m['metrics']['primary']['test'])"
-  cp models/model_metadata.json /tmp/meta1.json && python scripts/train.py && python -c "import json;a=json.load(open('/tmp/meta1.json'))['metrics'];b=json.load(open('models/model_metadata.json'))['metrics'];print('identical' if a==b else 'DIFFERENT')"
-  pytest -v --cov=predmaint --cov-report=term-missing
+  ruff check . && ruff format --check .
+  pytest -q
+  python scripts/train.py --model baseline
+  time python scripts/train.py --model primary
+  python scripts/train.py --select
+  pytest -q -m data -v                 # incl. promoted-model RMSE recomputation
+  pytest -q --cov=predmaint
+  ls -l models/*.joblib
   ```
 
-- **Acceptance criteria:** both models have CV and test MAE/RMSE/NASA from an actual run, recorded in 14; second run prints `identical`; training time < 5 min recorded; artifact + metadata present with all 05 §9 fields; all tests pass.
-- **Estimated effort:** 4 h · **Status:** Not started.
+- **Acceptance criteria:** both candidates have CV and official-test MAE/RMSE/NASA from actual runs (05 §7a, 14); the served model follows ADR-024; a repeat primary run gives identical metrics; primary training < 5 min wall; `model.joblib` + `model_metadata.json` include `model_name`, `selected_by`, `model_version`, `comparison`; all tests pass, including real-data tests locally.
+- **Estimated effort:** 5 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
 
 ## M4 — FastAPI service
 

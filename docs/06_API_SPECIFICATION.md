@@ -15,7 +15,7 @@ FastAPI app `predmaint.api.main:app`, served by uvicorn on port **8000**. JSON o
 200:
 
 ```json
-{"status": "ok", "model_loaded": true, "model_version": "hgb-20261110T120000Z"}
+{"status": "ok", "model_loaded": true, "model_version": "primary-20261108-f4c86df"}
 ```
 
 503 (artifact missing/corrupt): error envelope (§6) with `code = "MODEL_UNAVAILABLE"`.
@@ -52,7 +52,7 @@ FastAPI app `predmaint.api.main:app`, served by uvicorn on port **8000**. JSON o
 
 1. `len(records) ≥ window_size` → else 422 `INSUFFICIENT_CYCLES`. Confirmed: fewer than `WINDOW_SIZE` (30, from `predmaint.config`, recorded in metadata) cycles always yields HTTP 422 with the standard error body (§6).
 2. All `required_sensors` present and non-null in all records → else 422 `MISSING_SENSORS` (details list the missing names).
-3. After sorting by `cycle`: unique and consecutive (+1) → else 422 `NON_CONSECUTIVE_CYCLES`.
+3. Records must be in chronological order as sent: `cycle` strictly increasing by exactly 1 (no sorting is applied; out-of-order, duplicate or missing cycles) → else 422 `NON_CONSECUTIVE_CYCLES`.
 4. Prediction uses the last `window_size` records; the feature row is the last cycle.
 5. Values of required sensors outside metadata `training_ranges` → still 200, with a warning per (sensor) in `warnings`.
 
@@ -62,19 +62,21 @@ FastAPI app `predmaint.api.main:app`, served by uvicorn on port **8000**. JSON o
 {
   "unit_id": "test-unit-1",
   "predicted_rul": 87.4,
-  "health_band": "HEALTHY",
-  "last_cycle": 31,
+  "health_status": "healthy",
+  "cycles_received": 31,
   "cycles_used": 30,
-  "model_version": "hgb-20261110T120000Z",
+  "last_cycle": 31,
+  "model_version": "primary-20261108-f4c86df",
   "warnings": []
 }
 ```
 
 | Field | Type | Rule |
 |---|---|---|
-| `predicted_rul` | float | ≥ 0, cycles, rounded to 2 decimals. |
-| `health_band` | `"CRITICAL" \| "WARNING" \| "HEALTHY"` | Thresholds from metadata `health_bands` (default < 30 / < 80 / else). |
-| `last_cycle` | int | Max `cycle` in the request. |
+| `predicted_rul` | float | In `[0, rul_cap]` (ADR-027), cycles, rounded to 2 decimals. |
+| `health_status` | `"critical" \| "warning" \| "healthy"` | ADR-025, constants in `predmaint.config.HEALTH_BANDS`: `critical` if `predicted_rul` < 20; `warning` if 20 ≤ `predicted_rul` < 60; `healthy` if ≥ 60. |
+| `cycles_received` | int | Number of records in the request. |
+| `last_cycle` | int | `cycle` of the last record. |
 | `cycles_used` | int | = `window_size`. |
 | `model_version` | string | From metadata. |
 | `warnings` | array of string | e.g. `"OUT_OF_TRAINING_RANGE: s_7 value 560.1 outside [549.85, 556.06]"` (format illustrative of shape; ranges come from metadata). |
@@ -85,9 +87,9 @@ FastAPI app `predmaint.api.main:app`, served by uvicorn on port **8000**. JSON o
 
 ```json
 {
-  "model_version": "hgb-20261110T120000Z",
-  "model_name": "hist_gradient_boosting",
-  "trained_at": "2026-11-10T12:00:00Z",
+  "model_version": "primary-20261108-f4c86df",
+  "model_name": "primary",
+  "trained_at": "2026-11-08T15:04:41Z",
   "git_sha": "unknown",
   "data_subset": "FD001",
   "train_sha256": "963b5e22825b34d8b21c69e1aeb4af3e647050eb672ee8834ba4b5d91d2de0f8",
@@ -95,9 +97,9 @@ FastAPI app `predmaint.api.main:app`, served by uvicorn on port **8000**. JSON o
   "rul_cap": 125,
   "required_sensors": ["s_2", "..."],
   "feature_names": ["cycle", "s_2", "s_2_roll_mean", "s_2_roll_std", "..."],
-  "health_bands": {"critical_below": 30, "warning_below": 80},
+  "health_bands": {"critical_below": 20, "warning_below": 60},
   "metrics": {"test": {"mae": 0.0, "rmse": 0.0, "nasa_score": 0.0}, "cv": {"mae_mean": 0.0, "rmse_mean": 0.0}},
-  "selected_over_baseline": true,
+  "selected_by": "cv_rmse",
   "sklearn_version_match": true
 }
 ```
@@ -106,11 +108,11 @@ Values illustrate shape only; all fields are read from `model_metadata.json` (05
 
 ### 4.2 Field source
 
-`metrics` = the selected candidate's `test` and `cv` means. `selected_over_baseline` = `selected == "primary"`.
+`metrics` = the selected candidate's `test` and `cv` means. `selected_by` is copied from metadata (ADR-024). The full candidate comparison stays in `model_metadata.json` / `reports/model_comparison.md`.
 
 ### 4.3 Required fields (FR-012)
 
-`model_version, model_name, trained_at, git_sha, data_subset, train_sha256, window_size, rul_cap, required_sensors, feature_names, health_bands, metrics, selected_over_baseline, sklearn_version_match`.
+`model_version, model_name, trained_at, git_sha, data_subset, train_sha256, window_size, rul_cap, required_sensors, feature_names, health_bands, metrics, selected_by, sklearn_version_match`.
 
 ## 5. Status codes
 
@@ -131,13 +133,15 @@ All non-2xx responses:
 {"error": {"code": "MISSING_SENSORS", "message": "Required sensors missing or null: s_7, s_12", "details": [{"sensor": "s_7"}, {"sensor": "s_12"}]}}
 ```
 
+Exception classes live in `predmaint.models.predict` (inference contract, 05 §10); all input errors subclass `InputContractError`.
+
 | `code` | HTTP | Raised by |
 |---|---|---|
-| `VALIDATION_ERROR` | 422 | Pydantic `RequestValidationError`; `details` = Pydantic errors (`loc`, `msg`, `type`). |
-| `INSUFFICIENT_CYCLES` | 422 | `InsufficientCyclesError` |
-| `MISSING_SENSORS` | 422 | `MissingSensorsError` |
+| `VALIDATION_ERROR` | 422 | Pydantic `RequestValidationError` (`details` = Pydantic errors: `loc`, `msg`, `type`); also `InvalidValuesError` (non-finite values, non-integer cycles) should one pass schema validation. |
+| `INSUFFICIENT_CYCLES` | 422 | `InsufficientHistoryError` |
+| `MISSING_SENSORS` | 422 | `MissingColumnsError` (`cycle` or required sensor missing/null; `.columns` → `details`) |
 | `NON_CONSECUTIVE_CYCLES` | 422 | `NonConsecutiveCyclesError` |
-| `MODEL_UNAVAILABLE` | 503 | `ModelUnavailableError` / model not loaded |
+| `MODEL_UNAVAILABLE` | 503 | `ModelNotAvailableError` from `load_model` / model not loaded |
 | `NOT_FOUND` / `METHOD_NOT_ALLOWED` | 404 / 405 | Starlette HTTP exceptions |
 | `INTERNAL_ERROR` | 500 | Any other exception; message is generic, trace logged only. |
 

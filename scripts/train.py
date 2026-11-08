@@ -1,6 +1,10 @@
 """Train and evaluate an FD001 RUL model (thin CLI over ``predmaint.models.train``).
 
-Usage: ``python scripts/train.py --model baseline``
+Usage::
+
+    python scripts/train.py --model baseline
+    python scripts/train.py --model primary
+    python scripts/train.py --select
 """
 
 from predmaint.models.train import main

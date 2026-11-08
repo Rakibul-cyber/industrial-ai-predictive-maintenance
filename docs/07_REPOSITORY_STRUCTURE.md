@@ -30,7 +30,8 @@ industrial-ai-predictive-maintenance/
 │   │   ├── metrics.py             #   MAE, RMSE, NASA score
 │   │   ├── train.py               #   CV, final fit, test evaluation, report (M2); selection (M3)
 │   │   ├── artifacts.py           #   save/load joblib + metadata JSON
-│   │   └── predict.py             #   load_model, predict_rul, health_band, contract errors
+│   │   ├── selection.py           #   ADR-024 selection + promotion to model.joblib, comparison reports (M3)
+│   │   └── predict.py             #   inference contract: load_model, predict_rul, health_status, errors
 │   ├── api/                       # HTTP serving layer
 │   │   ├── main.py                #   FastAPI app, lifespan model loading, routes
 │   │   ├── schemas.py             #   Pydantic request/response models
@@ -53,6 +54,7 @@ industrial-ai-predictive-maintenance/
 │   ├── test_features.py           #   M2
 │   ├── test_metrics.py            #   M2
 │   ├── test_train.py              #   M2 (baseline), M3 (primary + selection)
+│   ├── test_selection.py          #   M3
 │   ├── test_inference_contract.py #   M3
 │   ├── test_api.py                #   M4
 │   ├── test_dashboard_client.py   #   M5
@@ -65,10 +67,14 @@ industrial-ai-predictive-maintenance/
 │   ├── .gitkeep
 │   ├── baseline.joblib            #   per-candidate artifact (M2), gitignored
 │   ├── baseline_metadata.json     #   per-candidate metadata, gitignored (reports/ holds the committed record)
+│   ├── primary.joblib             #   per-candidate artifact (M3), gitignored (+ primary_metadata.json)
 │   ├── model.joblib               #   served (selected) model (M3), gitignored
 │   └── model_metadata.json        #   committed with reported results (M7)
 ├── reports/                       # small committed metric reports
-│   └── metrics_baseline.json      #   written by scripts/train.py --model baseline (M2)
+│   ├── metrics_baseline.json      #   written by scripts/train.py --model baseline (M2)
+│   ├── metrics_primary.json       #   written by scripts/train.py --model primary (M3)
+│   ├── model_comparison.json      #   written by scripts/train.py --select (M3)
+│   └── model_comparison.md        #   human-readable comparison + selection statement (M3)
 └── docs/                          # 00–15 planning and design documents
 ```
 

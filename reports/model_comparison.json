@@ -1,0 +1,64 @@
+{
+  "selected": "primary",
+  "selected_by": "cv_rmse",
+  "tie_break": "cv_mae",
+  "cv_ranking": [
+    "primary",
+    "baseline"
+  ],
+  "test_ranking": [
+    "primary",
+    "baseline"
+  ],
+  "rankings_agree": true,
+  "reason": "Selected primary because its 5-fold GroupKFold CV RMSE (16.559) is lower than baseline's (19.152) (ADR-024). Official test metrics are reported but do not drive the choice. The official test ranking agrees with the CV ranking.",
+  "candidates": {
+    "baseline": {
+      "model_version": "ridge-20261108T150138Z",
+      "estimator": "ridge",
+      "hyperparameters": {
+        "alpha": 1.0
+      },
+      "cv": {
+        "mae_mean": 15.112349243046234,
+        "mae_std": 1.1557854191072308,
+        "rmse_mean": 19.15189686883198,
+        "rmse_std": 1.1823878227941347
+      },
+      "test": {
+        "mae": 15.34695896607957,
+        "rmse": 19.14436689230755,
+        "nasa_score": 590.6268327818287
+      },
+      "test_clipped_truth": {
+        "mae": 14.27695896607957,
+        "rmse": 17.84549916833609
+      }
+    },
+    "primary": {
+      "model_version": "hgb-20261108T150441Z",
+      "estimator": "hgb",
+      "hyperparameters": {
+        "learning_rate": 0.05,
+        "max_iter": 200,
+        "max_leaf_nodes": 15,
+        "l2_regularization": 0.0
+      },
+      "cv": {
+        "mae_mean": 11.842774355821547,
+        "mae_std": 0.6763920356345671,
+        "rmse_mean": 16.558936995946503,
+        "rmse_std": 0.6954267044128535
+      },
+      "test": {
+        "mae": 12.566732875707899,
+        "rmse": 16.609852374016835,
+        "nasa_score": 441.5350326191249
+      },
+      "test_clipped_truth": {
+        "mae": 11.496732875707899,
+        "rmse": 15.333382373407852
+      }
+    }
+  }
+}

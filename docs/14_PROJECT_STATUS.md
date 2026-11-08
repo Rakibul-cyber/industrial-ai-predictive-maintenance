@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **M2 — Labels, features, baseline training & evaluation: complete, awaiting review** |
+| Current milestone | **M3 — Primary model, selection, served artifact, inference contract: complete, awaiting review** |
 | Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `4e8c04c` "feat: Implement initial structure for RUL prediction platform" (M1, committed and pushed by the user), on top of `71295ba` (M0 docs). M2 work is **uncommitted** in the working tree for review. Remote `origin` = `https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git` (public). |
-| Next approved action | **Await user review of M2** and authorization for Milestone 3 (and, separately, any commit/push of M2). |
+| Git ref | `main` = `origin/main` @ `f4c86df` "feat: implement feature engineering, model training, and evaluation framework" (M2, committed and pushed by the user; CI run 42492050196 green), on top of `4e8c04c` (M1) and `71295ba` (M0). The working tree was clean at the start of M3; M3 work is **uncommitted** for review. Remote `origin` = `https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git` (public). |
+| Next approved action | **Await user review of M3** and authorization for Milestone 4 (and, separately, any commit/push of M3 — the next push also exercises the updated CI workflow). |
 
 ## Milestone tracker
 
@@ -13,8 +13,8 @@
 |---|---|---|
 | M0 Planning | **Approved** 2026-11-08 (architecture frozen; ADR-001…021 Accepted, ADR-022 added) | M0 section below |
 | M1 Scaffold, CI, data | **Accepted** 2026-11-08; committed `4e8c04c`, pushed; CI green | M1 section + CI section below |
-| M2 Labels, features, baseline (re-scoped, CR-002) | **Complete** 2026-11-08 (uncommitted, awaiting review) | M2 section below |
-| M3 Primary model, selection, inference contract | Not started | — |
+| M2 Labels, features, baseline (re-scoped, CR-002) | **Accepted** 2026-11-08; committed `f4c86df`, pushed; CI green | M2 section below |
+| M3 Primary model, selection, inference contract (CR-003) | **Complete** 2026-11-08 (uncommitted, awaiting review) | M3 section below |
 | M4 API | Not started | — |
 | M5 Dashboard | Not started | — |
 | M6 Docker | Not started | — |
@@ -134,12 +134,60 @@ $ pytest -q --cov=predmaint → 83 passed, 1 skipped; TOTAL 93 %
 
 **Findings:** the test RMSE of 19.2 lies inside the 15–30 sanity band and CV ≈ test, so no leakage signal was found and nothing was tuned. The rolling windows are computed independently per window, so feature rows are bit-identical regardless of surrounding history (tests for truncation and trailing-window-only invariance). The baseline artifact is 5.3 KB, which matters for M6-T4.
 
+## M3 — results (2026-11-08, actual command output, trimmed)
+
+**Amendments recorded:** CR-003; ADR-024 (CV-RMSE selection, supersedes ADR-010), ADR-025 (bands 20/60, supersedes ADR-017), ADR-026 (one bounded 12-config search, amends ADR-007), ADR-027 (clamp to [0, RUL_CAP], supersedes ADR-018).
+
+**CI housekeeping (no ADR):** `actions/checkout@v4 → @v7` and `actions/setup-python@v5 → @v7`. The GitHub API showed latest releases v7.0.1 (2026-07-20) and v7.1.0 (2026-10-22); both `action.yml` files declare `using: node24`, and `setup-python@v7` still accepts `python-version`, `cache` and `cache-dependency-path`. `runs-on: ubuntu-latest → ubuntu-24.04`. The YAML parsed with Ruby's `YAML.safe_load` (runs-on and both `uses:` confirmed). It is first exercised on the next push. CI on the M2 commit `f4c86df` (run 42492050196) was green.
+
+**Files created:** `src/predmaint/models/selection.py`, `tests/test_selection.py`, `tests/test_inference_contract.py`, `reports/metrics_primary.json`, `reports/model_comparison.json`, `reports/model_comparison.md`. **Modified:** `config.py`, `models/{registry,train,predict}.py`, `scripts/train.py`, `tests/{conftest,test_train,test_real_data}.py`, `.github/workflows/ci.yml`, `reports/metrics_baseline.json` (re-measured), README, CLAUDE.md, docs 00, 01, 02, 04, 05, 06, 07, 08, 09, 11, 12, 13, 14, 15. Generated, gitignored: `models/{primary,model}.joblib`, `models/{baseline,primary}_metadata.json`, `models/model_metadata.json`.
+
+```text
+$ ruff check .            → All checks passed!
+$ ruff format --check .   → 48 files already formatted
+$ pytest -q               → 120 passed, 1 skipped (network) in 5.94s
+$ time python scripts/train.py --model primary
+Bounded search (ADR-026): 12 configurations, scored by 5-fold GroupKFold CV RMSE
+  [ 5/12] {'learning_rate': 0.05, 'max_iter': 200, 'max_leaf_nodes': 15, 'l2_regularization': 0.0}  CV RMSE 16.559 ± 0.695  MAE 11.843
+  (other 11 configurations: CV RMSE 16.629–16.828; full table in 05 §7b)
+Selected configuration: {'learning_rate': 0.05, 'max_iter': 200, 'max_leaf_nodes': 15, 'l2_regularization': 0.0}
+  CV MAE  = 11.843 ± 0.676
+  CV RMSE = 16.559 ± 0.695
+Official test set (100 units, last observed cycle, unclipped truth): MAE=12.567 RMSE=16.610 NASA score=441.5
+  (truth clipped at 125: MAE=11.497 RMSE=15.333)
+Elapsed: 78.8 s      [time: 434.19s user 148.24s system 726% cpu 1:20.17 total]
+$ python scripts/train.py --select
+| baseline | `ridge-20261108T150138Z` | 19.152 ± 1.182 | 15.112 ± 1.156 | 19.144 | 15.347 | 590.6 | 17.845 |
+| primary (selected) | `hgb-20261108T150258Z` | 16.559 ± 0.695 | 11.843 ± 0.676 | 16.610 | 12.567 | 441.5 | 15.333 |
+Selected primary because its 5-fold GroupKFold CV RMSE (16.559) is lower than baseline's (19.152) (ADR-024). … The official test ranking agrees with the CV ranking.
+$ (repeat primary run) → metrics identical: True | search identical: True; primary.joblib byte-identical; then --select again
+  → served model_version primary-20261108-f4c86df (candidate hgb-20261108T150441Z)
+$ pytest -q -m data -v    → 5 passed (incl. promoted-model test RMSE recomputed via predict_rul == metadata)
+$ pytest -q --cov=predmaint → 120 passed, 1 skipped; TOTAL 94 %
+$ ls -l models/*.joblib
+   5297  baseline.joblib
+ 451385  model.joblib      (byte copy of primary.joblib)
+ 451385  primary.joblib
+```
+
+**Findings:**
+
+- The baseline was re-measured because the shared clamp gained the `RUL_CAP` upper bound (ADR-027). Test RMSE moved 19.205 → 19.144 and CV RMSE 19.287 → 19.152; one test prediction was 130.58. The M2 numbers are kept in 05 §7a for transparency.
+- The primary beats the baseline on CV (16.559 vs 19.152) and on test (16.610 vs 19.144); the CV and test rankings agree. The 12 configurations differ by < 0.3 CV RMSE, so there is no sign that a further search would change the conclusion. No second round was run.
+- **Runtime:** wall time is well under 5 minutes (≈ 80 s). Total CPU time (user + sys) was ≈ 582 s ≈ 9.7 CPU-minutes, because HGB uses all cores. NFR-002 is defined as wall time, so it is met; if "5 minutes CPU" was meant as CPU-seconds, it is exceeded (single-threaded wall time is unmeasured).
+- **Artifact size for M6-T4:** the served `model.joblib` is 451,385 bytes (≈ 441 KiB) and the baseline 5,297 bytes. Committing the served model is size-viable (well under typical repo limits, no Git LFS needed). The remaining M6 considerations are sklearn-version coupling of the pickle and keeping the committed file in sync with `model_metadata.json`.
+- The inference contract checks cycle order **as given** (out-of-order input raises rather than being sorted); doc 06 §3.3 is updated accordingly.
+
 ## Measured results
 
 | Item | Value | Source |
 |---|---|---|
-| Baseline (Ridge) official test MAE / RMSE / NASA | 15.403 / 19.205 / 595.2 | M2 run 2026-11-08T14:50:35Z (05 §7a) |
-| Baseline CV MAE / RMSE (mean ± std) | 15.504 ± 1.052 / 19.287 ± 1.181 | same |
-| Baseline training wall time (`time python scripts/train.py --model baseline`) | 1.4 s total (pipeline 0.2 s) | same |
-| `baseline.joblib` size | 5,297 bytes | `ls -l models/` (input for M6-T4) |
-| Coverage `src/predmaint` | 93 % (514 stmts, 36 missed) | `pytest -q --cov=predmaint` |
+| **Served model** | `primary-20261108-f4c86df` (HGB, lr 0.05, max_iter 200, 15 leaves, l2 0) | `models/model_metadata.json`, 05 §7c |
+| Primary official test MAE / RMSE / NASA | 12.567 / 16.610 / 441.5 | M3 run 2026-11-08 (05 §7a) |
+| Primary CV MAE / RMSE (mean ± std) | 11.843 ± 0.676 / 16.559 ± 0.695 | same |
+| Baseline official test MAE / RMSE / NASA (clamp [0, 125]) | 15.347 / 19.144 / 590.6 | same; M2 value with clamp ≥ 0 only: 15.403 / 19.205 / 595.2 |
+| Baseline CV MAE / RMSE (mean ± std) | 15.112 ± 1.156 / 19.152 ± 1.182 | same; M2: 15.504 ± 1.052 / 19.287 ± 1.181 |
+| Primary training time (12-config search + final fit + test) | 76.6–80 s wall; 582 s CPU (user + sys) | `time` |
+| Baseline training wall time | 1.4 s total | M2 |
+| Artifact sizes | `model.joblib` / `primary.joblib` 451,385 B; `baseline.joblib` 5,297 B | `ls -l models/*.joblib` |
+| Coverage `src/predmaint` | 94 % (747 stmts, 45 missed) | `pytest -q --cov=predmaint` |

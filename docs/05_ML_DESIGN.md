@@ -8,9 +8,11 @@ Regress **RUL in cycles** for an FD001 engine from its observed sensor history, 
 
 `Pipeline([("select", ColumnTransformer([("features", "passthrough", feature_names)], remainder="drop")), ("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))])`. Interpretable, fast, and sets the bar the primary model must beat. The leading `select` step (ADR-023) stores the training-time feature list — and therefore the kept sensors — inside the artifact and rejects inputs missing any of those columns; the scaler is fitted inside the pipeline, i.e. on training rows only (per CV fold, and on the full training set for the final fit).
 
-## 3. Primary model (ADR-007)
+## 3. Primary model (ADR-007, ADR-026)
 
-`HistGradientBoostingRegressor(early_stopping=False, random_state=42)`, all other hyperparameters at scikit-learn 1.9.1 defaults (no scaler; same leading `select` step as the baseline). Hyperparameters are fixed a priori — no tuning in the MVP. `early_stopping=False` because the estimator's internal validation split would be row-wise, mixing cycles of the same engine.
+`Pipeline([("select", <same ColumnTransformer>), ("model", HistGradientBoostingRegressor(early_stopping=False, random_state=42, **params))])` on the identical 43 features, training-row filter and seed as the baseline. No scaler: tree splits are invariant to monotonic feature scaling. Internal early stopping stays off because its validation split is row-wise and would mix cycles of the same engine; the iteration budget is a grid parameter instead.
+
+**One bounded search (ADR-026), no second round:** 12 configurations = (learning_rate, max_iter) ∈ {(0.1, 100), (0.05, 200), (0.03, 400)} × max_leaf_nodes ∈ {15, 31} × l2_regularization ∈ {0.0, 1.0}. Each one is scored by the same 5-fold GroupKFold CV; the winner has the lowest CV RMSE mean (tie-break CV MAE mean). The test set is never consulted. The grid, every configuration's CV result and the winner are stored in metadata/report `search`. Results are in §7b.
 
 ## 4. Feature strategy (ADR-005)
 
@@ -53,7 +55,7 @@ All of this is implemented once in `predmaint/features/build.py` and reused by t
 
 For predictions `ŷ` and truths `y` over *n* units, `d = ŷ − y`:
 
-- **MAE** = mean(|d|); **RMSE** = sqrt(mean(d²)) — primary, used for selection.
+- **MAE** = mean(|d|); **RMSE** = sqrt(mean(d²)) — primary metrics. Model selection uses **CV** RMSE (tie-break CV MAE) only (ADR-024, §8).
 - **NASA score** (secondary and informational only — **never used for model selection**, §8; lower is better): `s = Σ (exp(−d/13) − 1)` for `d < 0` (early), `Σ (exp(d/10) − 1)` for `d ≥ 0` (late).
 
 **Evidence for the NASA score (verified from the paper bundled in the archive, eq. 11 and §VII):** `d = estimated RUL − true RUL`; "late predictions were more heavily penalized than early predictions"; `a1 = 10`, `a2 = 13`. The printed equation pairs `a1` with `d < 0` and `a2` with `d ≥ 0`, which contradicts the text and Figure 9 (steeper for positive error). We follow the **stated intent** (late divisor 10, early divisor 13) — ADR-009. Unit tests pin known values (`d = 10 → e − 1`, `d = −13 → e − 1`).
@@ -64,91 +66,125 @@ Reported metric sets:
 - `test`: MAE, RMSE, NASA score vs **unclipped** `RUL_FD001` (primary).
 - `test_clipped_truth`: MAE/RMSE vs `min(RUL_FD001, rul_cap)` — for comparability with literature that clips test truth; not used for selection.
 
+All predictions (CV folds, test, API) pass through the same clamp to `[0, rul_cap]` (ADR-027).
+
 No metric value is assumed or targeted in advance; actual values are recorded in [14](14_PROJECT_STATUS.md).
 
-### 7a. Measured baseline (Ridge) — measured 2026-11-08T14:50:35Z
+### 7a. Measured results — 2026-11-08 (Milestone 3)
 
-Provenance: code = commit `4e8c04c` plus the uncommitted Milestone 2 working tree (`git_dirty: true` in the report), `model_version` `ridge-20261108T145035Z`, Python 3.13.3, scikit-learn 1.9.1; data SHA-256 per 04 §3. Source: [reports/metrics_baseline.json](../reports/metrics_baseline.json). Two consecutive runs produced identical metrics.
+Provenance: code = commit `f4c86df` plus the uncommitted Milestone 3 working tree (`git_dirty: true`), Python 3.13.3, scikit-learn 1.9.1, data SHA-256 per 04 §3. Sources: [reports/metrics_baseline.json](../reports/metrics_baseline.json) (`ridge-20261108T150138Z`, trained 15:01:38Z), [reports/metrics_primary.json](../reports/metrics_primary.json) (`hgb-20261108T150441Z`, trained 15:04:41Z), [reports/model_comparison.md](../reports/model_comparison.md).
 
-| Metric set | MAE | RMSE | NASA score |
-|---|---|---|---|
-| CV, 5-fold GroupKFold by unit, capped labels (mean ± std, ddof=1) | 15.504 ± 1.052 | 19.287 ± 1.181 | — |
-| **Official test, 100 units, last cycle, unclipped truth (primary)** | **15.403** | **19.205** | 595.2 |
-| Official test, truth clipped at 125 (literature comparability only) | 14.333 | 17.910 | — |
+| Model | CV RMSE (mean ± std) | CV MAE (mean ± std) | **Test RMSE** | **Test MAE** | NASA score | Test RMSE / MAE, truth clipped at 125 |
+|---|---|---|---|---|---|---|
+| Baseline — Ridge(alpha=1.0) | 19.152 ± 1.182 | 15.112 ± 1.156 | 19.144 | 15.347 | 590.6 | 17.845 / 14.277 |
+| **Primary — HGB (selected)** | **16.559 ± 0.695** | **11.843 ± 0.676** | **16.610** | **12.567** | 441.5 | 15.333 / 11.497 |
 
-Training rows: 17,731 of 20,631 (rows without a full 30-cycle window dropped). Per-fold RMSE: 20.933, 19.183, 19.474, 17.609, 19.234. CV and test agree closely, so there is no leakage signal; the result lies within the expected 15–30 RMSE sanity band for simple regressors. The baseline was not tuned.
+CV: 5-fold GroupKFold by engine, capped labels, std ddof=1. Test: official FD001 test set, last observed cycle of each of 100 engines, unclipped truth. Per-fold CV RMSE — baseline: 20.810, 19.111, 19.309, 17.476, 19.054; primary: 17.479, 16.769, 15.898, 15.826, 16.823. Training rows: 17,731 of 20,631.
 
-## 8. Model selection rule (ADR-010)
+**Baseline change since M2 (disclosed):** the M2 run (`ridge-20261108T145035Z`) clamped predictions at 0 only and reported CV RMSE 19.287 ± 1.181, test RMSE 19.205, test MAE 15.403, NASA 595.2. The shared clamp is now `[0, 125]` (ADR-027) and also applies inside CV. One test prediction was 130.58, which accounts for the small improvement. The model itself is unchanged.
 
-The primary model is selected **only if** its `test.mae < baseline test.mae` **and** `test.rmse < baseline test.rmse`. Otherwise the baseline is shipped. The NASA score and CV metrics play no part in this decision. The decision and both candidates' metrics are written to metadata (`selected`, `selection_reason`).
+Reproducibility (NFR-001): retraining the primary gave identical metrics and search results and a byte-identical `primary.joblib`. Primary training wall time 76.6–80 s on the Apple-Silicon dev machine (`time`: 434 s user + 148 s sys CPU, i.e. ≈ 9.7 CPU-minutes across cores, because HGB is multi-threaded).
+
+### 7b. Primary search results (ADR-026)
+
+| learning_rate | max_iter | max_leaf_nodes | l2_regularization | CV RMSE (mean ± std) | CV MAE |
+|---|---|---|---|---|---|
+| 0.1 | 100 | 15 | 0.0 | 16.788 ± 0.614 | 11.962 |
+| 0.1 | 100 | 15 | 1.0 | 16.717 ± 0.679 | 11.915 |
+| 0.1 | 100 | 31 | 0.0 | 16.740 ± 0.636 | 11.808 |
+| 0.1 | 100 | 31 | 1.0 | 16.717 ± 0.653 | 11.826 |
+| **0.05** | **200** | **15** | **0.0** | **16.559 ± 0.695** | **11.843** |
+| 0.05 | 200 | 15 | 1.0 | 16.688 ± 0.686 | 11.958 |
+| 0.05 | 200 | 31 | 0.0 | 16.828 ± 0.679 | 11.840 |
+| 0.05 | 200 | 31 | 1.0 | 16.726 ± 0.646 | 11.789 |
+| 0.03 | 400 | 15 | 0.0 | 16.642 ± 0.634 | 11.849 |
+| 0.03 | 400 | 15 | 1.0 | 16.629 ± 0.652 | 11.843 |
+| 0.03 | 400 | 31 | 0.0 | 16.683 ± 0.611 | 11.742 |
+| 0.03 | 400 | 31 | 1.0 | 16.798 ± 0.634 | 11.815 |
+
+The spread across all 12 configurations is small (CV RMSE 16.56–16.83, within one fold-std), so the choice of configuration matters far less than the move from Ridge to boosted trees.
+
+### 7c. Selection outcome
+
+**Primary (HGB) was promoted** as `primary-20261108-f4c86df`: its CV RMSE (16.559) is lower than the baseline's (19.152). The official test ranking agrees (16.610 vs 19.144), so no disagreement was flagged.
+
+## 8. Model selection rule (ADR-024, supersedes ADR-010)
+
+`python scripts/train.py --select` reads both candidates' metadata. It requires both to share the same data hashes, config, feature names and kept sensors, then picks the candidate with the **lowest 5-fold GroupKFold CV RMSE mean**. Tie-breaks: CV MAE mean, then the simpler model (baseline). Official test metrics — unclipped truth primary, clipped secondary — and the NASA score are reported for both but **never drive the choice**. If the test ranking disagrees with the CV ranking, the selection statement says so explicitly and the CV choice stands.
 
 ## 9. Artifact format and metadata schema (ADR-011, ADR-023)
 
-**Per-candidate artifacts (from M2):** `scripts/train.py --model <name>` writes
+**Per-candidate artifacts:** `scripts/train.py --model <name>` writes
 
 - `models/<name>.joblib` — the fitted sklearn `Pipeline` (select → [scaler] → estimator), gitignored;
-- `models/<name>_metadata.json` — gitignored; same fields as the schema below except that `metrics` is the candidate's own block (`cv`, `test`, `test_clipped_truth`, `n_train_rows`, `n_test_units`) and there is no `selected` / `selection_reason`; adds `estimator` (`"ridge"`) and `git_dirty`;
-- `reports/metrics_<name>.json` — **committed**; a subset of the metadata (identity, provenance, config, sensors, metrics).
+- `models/<name>_metadata.json` — gitignored; fields as in the example below, minus the promotion fields (`candidate_model_version`, `selected_by`, `promoted_at`, `comparison`); `model_version` = `{"ridge"|"hgb"}-{trained_at as YYYYMMDDTHHMMSSZ}`;
+- `reports/metrics_<name>.json` — **committed**; a subset (identity, provenance, config, sensors, hyperparameters, search, metrics).
 
-**Served artifact (M3):** after ADR-010 selection, M3 writes the files the API loads:
+**Served artifact:** `scripts/train.py --select` writes the files the API loads:
 
-- `models/model.joblib` — the fitted sklearn `Pipeline` of the selected candidate (`joblib.dump`).
-- `models/model_metadata.json`:
+- `models/model.joblib` — a byte copy of the winning candidate's joblib;
+- `models/model_metadata.json` — the winner's metadata plus promotion fields;
+- `reports/model_comparison.json` and `reports/model_comparison.md` — committed comparison table and selection statement.
 
 ```json
 {
   "schema_version": 1,
-  "model_version": "hgb-20261110T120000Z",
-  "model_name": "hist_gradient_boosting",
-  "trained_at": "2026-11-10T12:00:00Z",
+  "model_name": "primary",
+  "estimator": "hgb",
+  "model_version": "primary-20261108-f4c86df",
+  "candidate_model_version": "hgb-20261108T150441Z",
+  "selected_by": "cv_rmse",
+  "trained_at": "2026-11-08T15:04:41Z",
+  "promoted_at": "2026-11-08T15:04:43Z",
   "git_sha": "<40-hex or 'unknown'>",
+  "git_dirty": true,
   "python_version": "3.13.3",
   "library_versions": {"scikit-learn": "1.9.1", "pandas": "3.1.1", "numpy": "2.5.4", "joblib": "1.6.0"},
-  "data": {
-    "subset": "FD001",
-    "train_sha256": "963b5e22…",
-    "test_sha256": "3cda7109…",
-    "rul_sha256": "a19c8ec9…"
-  },
+  "data": {"subset": "FD001", "train_sha256": "963b5e22…", "test_sha256": "3cda7109…", "rul_sha256": "a19c8ec9…"},
   "config": {"rul_cap": 125, "window_size": 30, "random_seed": 42, "cv_folds": 5},
   "required_sensors": ["s_2", "…"],
-  "dropped_columns": ["setting_1", "setting_2", "setting_3", "…"],
+  "dropped_columns": ["setting_1", "setting_2", "setting_3", "s_1", "…"],
   "feature_names": ["cycle", "s_2", "s_2_roll_mean", "s_2_roll_std", "…"],
-  "training_ranges": {"s_2": {"min": 0.0, "max": 0.0}},
-  "health_bands": {"critical_below": 30, "warning_below": 80},
-  "metrics": {
-    "baseline": {"cv": {"mae_mean": 0.0, "mae_std": 0.0, "rmse_mean": 0.0, "rmse_std": 0.0, "folds": []},
-                 "test": {"mae": 0.0, "rmse": 0.0, "nasa_score": 0.0},
-                 "test_clipped_truth": {"mae": 0.0, "rmse": 0.0}},
-    "primary":  {"cv": {}, "test": {}, "test_clipped_truth": {}}
-  },
-  "selected": "primary",
-  "selection_reason": "primary improved test MAE and RMSE over baseline"
+  "training_ranges": {"s_2": {"min": 641.21, "max": 644.53}},
+  "health_bands": {"critical_below": 20, "warning_below": 60},
+  "hyperparameters": {"learning_rate": 0.05, "max_iter": 200, "max_leaf_nodes": 15, "l2_regularization": 0.0},
+  "search": {"scored_by": "cv_rmse_mean (tie-break cv_mae_mean)", "n_configurations": 12, "grid": ["…"], "results": ["…"], "selected_params": {"…": "…"}},
+  "metrics": {"cv": {"mae_mean": 0.0, "mae_std": 0.0, "rmse_mean": 0.0, "rmse_std": 0.0, "folds": ["…"]},
+              "test": {"mae": 0.0, "rmse": 0.0, "nasa_score": 0.0},
+              "test_clipped_truth": {"mae": 0.0, "rmse": 0.0}, "n_train_rows": 17731, "n_test_units": 100},
+  "comparison": {"selected": "primary", "selected_by": "cv_rmse", "tie_break": "cv_mae",
+                 "cv_ranking": ["primary", "baseline"], "test_ranking": ["primary", "baseline"],
+                 "rankings_agree": true, "reason": "Selected primary because …",
+                 "candidates": {"baseline": {"model_version": "…", "cv": {}, "test": {}, "test_clipped_truth": {}}, "primary": {}}}
 }
 ```
 
-Numbers and the `s_2` entry above illustrate **shape only**; real values are written by training. `model_version` = `{"ridge"|"hgb"}-{trained_at as YYYYMMDDTHHMMSSZ}`. `training_ranges` covers each required sensor's raw min/max on train.
+Metric numbers and `"…"` illustrate **shape only**; the real values are in §7a and the files themselves. Served `model_version` = `<name>-<YYYYMMDD of training>-<short git SHA>`.
 
 ## 10. Inference contract (`predmaint/models/predict.py`)
 
 ```
-load_model(model_dir: Path) -> LoadedModel            # pipeline + metadata; raises ModelUnavailableError
-predict_rul(history: pd.DataFrame, model: LoadedModel) -> PredictionResult
-health_band(rul: float, bands: dict) -> Literal["CRITICAL", "WARNING", "HEALTHY"]
+load_model(model_dir: Path | None = None) -> LoadedModel     # default $MODEL_DIR; cached per directory
+clear_model_cache() -> None
+predict_rul(cycles: pd.DataFrame | Sequence[Mapping], model: LoadedModel) -> PredictionResult
+health_status(rul: float) -> Literal["critical", "warning", "healthy"]
+predict_from_features(pipeline, features, rul_cap) -> np.ndarray   # shared clamp, also used offline
 ```
 
-- `history`: one engine; columns `cycle` + every name in `required_sensors` (extra columns ignored); ≥ `window_size` rows; cycles consecutive (+1) after sorting.
-- Raises `InsufficientCyclesError`, `MissingSensorsError`, `NonConsecutiveCyclesError` (all subclass `InputContractError`) — mapped 1:1 to API error codes (06 §6).
-- `PredictionResult`: `predicted_rul` (float, clamped at ≥ 0, ADR-018), `health_band`, `last_cycle`, `cycles_used` (= `window_size`), `warnings` (list of out-of-training-range messages over the used window).
-- Health band (ADR-017): `CRITICAL` if RUL < 30; `WARNING` if 30 ≤ RUL < 80; else `HEALTHY`.
-- The API and the offline test evaluation call this same function; the contract test asserts identical outputs.
+- `load_model` loads `model.joblib` + `model_metadata.json` once per directory. Missing or unloadable files (corrupt pickle/JSON, schema mismatch, missing metadata keys) raise `ModelNotAvailableError`. Failures are not cached, so a model promoted afterwards is picked up.
+- `cycles`: one engine, records in **chronological order**. Columns `cycle` + every name in `required_sensors`; extra columns are ignored.
+- Checks, in order: ≥ `window_size` records (`InsufficientHistoryError`); `cycle` and required sensors present and non-null (`MissingColumnsError`, with `.columns`); values finite and cycles positive integers (`InvalidValuesError`); cycles strictly increasing by exactly 1 as given (`NonConsecutiveCyclesError` — covers out-of-order, duplicates, gaps). All except `ModelNotAvailableError` subclass `InputContractError(ValueError)`. HTTP mapping is in 06 §6.
+- Only the **last `window_size` records** are used. They pass through the shared `features.build.build_features` to produce one feature row; extra older history cannot change the result (tested).
+- `PredictionResult`: `predicted_rul` (float, clamped to `[0, rul_cap]`, ADR-027), `health_status` (ADR-025), `cycles_received`, `cycles_used` (= `window_size`), `last_cycle`, `model_version`, `warnings` (`OUT_OF_TRAINING_RANGE` messages for required sensors in the used window).
+- Health status (ADR-025, `config.HEALTH_BANDS`): `critical` if RUL < 20; `warning` if 20 ≤ RUL < 60; `healthy` if RUL ≥ 60.
+- The offline test evaluation and `predict_rul` produce bit-identical predictions (contract test; real-data test recomputes the served model's test RMSE through `predict_rul`).
 
 ## 11. Limitations
 
 - FD001 only: one operating condition and one fault mode; the model is not valid for other conditions.
 - Simulated data; no claim about real engines.
-- Predictions are effectively bounded near `rul_cap` (125); true test RULs up to 145 will be under-predicted by design.
-- Selecting between two pre-specified candidates on the test set introduces a small selection bias; CV metrics are reported alongside to expose it.
+- Predictions are clamped to `rul_cap` (125); true test RULs up to 145 are under-predicted by design.
+- The primary configuration was chosen by CV on the training set only, and selection is by CV, so the official test set stays a held-out report. The 12-configuration search still slightly favours the primary's CV estimate (best-of-12); its test RMSE (16.610) is close to its CV RMSE (16.559).
 - Rolling features need ≥ 30 cycles of history; younger engines cannot be scored.
 - No uncertainty estimate; health bands are illustrative thresholds, not engineering limits.
 - joblib artifacts are tied to the scikit-learn version (mismatch warning, 02 §7).

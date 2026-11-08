@@ -90,6 +90,43 @@ def synthetic_training_dir(tmp_path: Path) -> Path:
     return directory
 
 
+@pytest.fixture(scope="session")
+def served_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Train both candidates on synthetic data and promote one: a real served artifact.
+
+    The returned directory holds ``models/`` (incl. ``model.joblib``) and ``CMAPSSData/``.
+    """
+    from predmaint.models.selection import promote
+    from predmaint.models.train import run_training
+
+    root = tmp_path_factory.mktemp("served")
+    data_dir = root / "CMAPSSData"
+    data_dir.mkdir()
+    write_raw_trajectories(
+        make_trajectories([50, 55, 60, 65, 70, 75], seed=11), data_dir / "train_FD001.txt"
+    )
+    write_raw_trajectories(
+        make_trajectories([35, 40, 45, 50], seed=12), data_dir / "test_FD001.txt"
+    )
+    write_raw_rul([40, 30, 20, 10], data_dir / "RUL_FD001.txt")
+    tiny_grid = [
+        {"learning_rate": 0.1, "max_iter": 20, "max_leaf_nodes": 7, "l2_regularization": 0.0}
+    ]
+    for name in ("baseline", "primary"):
+        run_training(
+            name,
+            data_dir,
+            root / "models",
+            root / "reports",
+            verify_checksums=False,
+            expected=None,
+            search_grid=tiny_grid,
+            echo=lambda _msg: None,
+        )
+    promote(root / "models", root / "reports", echo=lambda _msg: None)
+    return root
+
+
 @pytest.fixture
 def real_cmapss_dir() -> Path:
     """The real FD001 directory under ``$DATA_DIR``; skips the test when absent."""

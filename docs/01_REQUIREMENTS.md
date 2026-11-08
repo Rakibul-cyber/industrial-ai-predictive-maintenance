@@ -12,11 +12,11 @@ Each requirement has a measurable acceptance criterion and traces to the milesto
 | FR-004 | Compute RUL training labels. | `RUL = max_cycle(unit) − cycle`, clipped at `rul_cap` (default 125, configurable). Unit tests: last cycle → 0; clip applied; unclipped when `rul_cap=None`. | M2 |
 | FR-005 | Engineer features causally. | Sensors selected by the rule in [05](05_ML_DESIGN.md) §4; for each kept sensor: raw value, trailing rolling mean and std over `window_size` (default 30) rows of the same unit; plus `cycle`. Unit test proves changing rows after cycle *t* does not change features at *t*. | M2 |
 | FR-006 | Train and cross-validate a baseline. | StandardScaler + Ridge evaluated with 5-fold GroupKFold by `unit`; per-fold and mean±std MAE/RMSE recorded in metadata. | M2 |
-| FR-007 | Train and cross-validate a primary model. | HistGradientBoostingRegressor with fixed hyperparameters, same CV protocol and outputs as FR-006. | M3 |
+| FR-007 | Train and cross-validate a primary model. | HistGradientBoostingRegressor chosen by one bounded search of ≤ 12 configurations scored by GroupKFold CV RMSE (ADR-026); same CV protocol and outputs as FR-006; grid and winner recorded in metadata. | M3 |
 | FR-008 | Evaluate on the official test set. | For each of 100 test units, predict at the last observed cycle; report MAE, RMSE (primary) and NASA score (secondary) against `RUL_FD001.txt`. | M2, M3 |
-| FR-009 | Select and persist the model. | Selection per ADR-010; `models/model.joblib` + `models/model_metadata.json` written with all fields of [05](05_ML_DESIGN.md) §9. | M3 |
+| FR-009 | Select and persist the model. | Selection per ADR-024 (CV RMSE, tie-break CV MAE; test/CV disagreement flagged); `models/model.joblib` + `models/model_metadata.json` written with all fields of [05](05_ML_DESIGN.md) §9. | M3 |
 | FR-010 | `GET /health`. | 200 with `model_loaded: true` when artifact loaded; 503 with error envelope otherwise. | M4 |
-| FR-011 | `POST /predict`. | Valid request ([06](06_API_SPECIFICATION.md)) returns 200 with `predicted_rul`, `health_band`, `model_version`; value equals offline inference on the same input (contract test). | M4 |
+| FR-011 | `POST /predict`. | Valid request ([06](06_API_SPECIFICATION.md)) returns 200 with `predicted_rul`, `health_status`, `model_version`; value equals offline inference on the same input (contract test). | M4 |
 | FR-012 | `GET /model/info`. | Returns metadata fields listed in 06 §4.3, read from `model_metadata.json`. | M4 |
 | FR-013 | Structured errors. | Every 4xx/5xx response uses the envelope `{"error": {"code", "message", "details"}}`; each error code in 06 §6 has a test. | M4 |
 | FR-014 | Dashboard shows model information. | Dashboard renders model version, type, and test metrics fetched from `GET /model/info`. | M5 |

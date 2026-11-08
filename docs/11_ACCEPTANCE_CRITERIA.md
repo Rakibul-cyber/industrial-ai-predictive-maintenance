@@ -6,10 +6,10 @@ Checked in M7. Each item needs **evidence** (command + actual output summary, re
 |---|---|---|---|
 | AC-01 | **Reproducible data acquisition:** fresh clone → `python scripts/download_data.py` downloads and verifies all checksums in 04 §3. | Command output; `shasum` output. | FR-001 |
 | AC-02 | **Data contract holds:** validation passes on real FD001; real-data tests run (not skipped). | `pytest -v -m data` output. | FR-002, FR-003 |
-| AC-03 | **Training runs:** `python scripts/train.py` completes in < 5 min with exit 0. | `time` output. | FR-006–FR-009, NFR-002 |
+| AC-03 | **Training runs:** `python scripts/train.py --model baseline`, `--model primary`, `--select` each exit 0; the primary run (incl. the 12-config search) completes in < 5 min wall time. | `time` output. | FR-006–FR-009, NFR-002 |
 | AC-04 | **Real metrics:** baseline and primary CV + test MAE/RMSE/NASA score come from that run and are copied verbatim into README and 14. | `model_metadata.json` excerpt. | FR-008 |
 | AC-05 | **Reproducible metrics:** second training run yields identical metrics. | "identical" output from 08 M3 command. | NFR-001 |
-| AC-06 | **Selection rule applied** exactly as ADR-010; `selection_reason` matches the numbers. | Metadata excerpt. | FR-009 |
+| AC-06 | **Selection rule applied** exactly as ADR-024: the served model has the lower CV RMSE (tie-break CV MAE); test metrics for both candidates are reported; any CV/test ranking disagreement is stated in `comparison.reason` and `reports/model_comparison.md`. | `model_metadata.json` `comparison` excerpt. | FR-009 |
 | AC-07 | **Loadable artifacts:** `load_model(models/)` succeeds in a new process; contract tests pass. | Test output. | FR-009 |
 | AC-08 | **API returns real predictions:** `/health` 200, `/model/info` matches metadata, `/predict` for test unit 1 (last 30 cycles) returns the same value as offline `predict_rul`. | curl outputs + contract test. | FR-010–FR-013 |
 | AC-09 | **API validation:** every error code in 06 §6 covered by a passing test. | `pytest tests/test_api.py -v`. | FR-013 |

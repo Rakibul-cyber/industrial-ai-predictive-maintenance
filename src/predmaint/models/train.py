@@ -11,7 +11,7 @@ import platform
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -47,7 +47,14 @@ from predmaint.features.build import (
 from predmaint.models.artifacts import SCHEMA_VERSION, save_artifacts
 from predmaint.models.metrics import mae, nasa_score, rmse
 from predmaint.models.predict import predict_from_features
-from predmaint.models.registry import ESTIMATOR_TAGS, MODEL_NAMES, make_model
+from predmaint.models.registry import (
+    BASELINE_PARAMS,
+    ESTIMATOR_TAGS,
+    MODEL_NAMES,
+    PRIMARY_SEARCH_GRID,
+    make_model,
+)
+from predmaint.models.selection import promote
 
 Echo = Callable[[str], None]
 
@@ -59,14 +66,18 @@ def group_folds(groups: np.ndarray, n_splits: int) -> Iterator[tuple[np.ndarray,
 
 
 def cross_validate(
-    pipeline: Pipeline, features: pd.DataFrame, y: np.ndarray, n_splits: int
+    pipeline: Pipeline,
+    features: pd.DataFrame,
+    y: np.ndarray,
+    n_splits: int,
+    rul_cap: int | None,
 ) -> dict[str, Any]:
     """GroupKFold-by-unit CV; returns per-fold and mean/std (ddof=1) MAE and RMSE."""
     groups = features["unit"].to_numpy()
     folds = []
     for fold, (train_idx, val_idx) in enumerate(group_folds(groups, n_splits), start=1):
         model = clone(pipeline).fit(features.iloc[train_idx], y[train_idx])
-        pred = predict_from_features(model, features.iloc[val_idx])
+        pred = predict_from_features(model, features.iloc[val_idx], rul_cap)
         folds.append(
             {
                 "fold": fold,
@@ -98,7 +109,7 @@ def evaluate_on_test(
             f"{len(truth)} RUL values but feature rows for units {last['unit'].tolist()[:5]}…; "
             "every test unit needs at least window_size cycles"
         )
-    pred = predict_from_features(pipeline, last)
+    pred = predict_from_features(pipeline, last, rul_cap)
     capped = np.minimum(truth, rul_cap) if rul_cap is not None else truth
     return {
         "test": {
@@ -109,6 +120,38 @@ def evaluate_on_test(
         "test_clipped_truth": {"mae": mae(capped, pred), "rmse": rmse(capped, pred)},
         "n_test_units": int(len(truth)),
     }
+
+
+def search_primary(
+    columns: Sequence[str],
+    features: pd.DataFrame,
+    y: np.ndarray,
+    *,
+    grid: Sequence[Mapping[str, Any]],
+    seed: int,
+    n_splits: int,
+    rul_cap: int | None,
+    echo: Echo,
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """ADR-026: score each configuration by GroupKFold CV; pick the lowest CV RMSE mean
+    (tie-break: CV MAE mean, then grid order). The test set is never used here.
+
+    Returns ``(best_params, best_cv, results)``.
+    """
+    results = []
+    for i, params in enumerate(grid, start=1):
+        started = time.perf_counter()
+        cv = cross_validate(
+            make_model("primary", columns, seed, params), features, y, n_splits, rul_cap
+        )
+        results.append({"params": dict(params), "cv": cv})
+        echo(
+            f"  [{i:2}/{len(grid)}] {dict(params)}  CV RMSE {cv['rmse_mean']:.3f} ± "
+            f"{cv['rmse_std']:.3f}  MAE {cv['mae_mean']:.3f}  "
+            f"({time.perf_counter() - started:.1f} s)"
+        )
+    best = min(results, key=lambda r: (r["cv"]["rmse_mean"], r["cv"]["mae_mean"]))
+    return best["params"], best["cv"], results
 
 
 def _git(*args: str) -> str | None:
@@ -142,6 +185,7 @@ def run_training(
     cv_folds: int = CV_FOLDS,
     verify_checksums: bool = True,
     expected: ExpectedFigures | None = FD001_EXPECTED,
+    search_grid: Sequence[Mapping[str, Any]] = PRIMARY_SEARCH_GRID,
     echo: Echo = print,
 ) -> dict[str, Any]:
     """Train, cross-validate and test-evaluate one candidate, then save its artifacts.
@@ -186,8 +230,39 @@ def run_training(
         f"{train_features['unit'].nunique()} units"
     )
 
-    pipeline = make_model(model_name, columns, seed)
-    cv = cross_validate(pipeline, train_features, y, cv_folds)
+    search: dict[str, Any] | None = None
+    if model_name == "primary":
+        echo(
+            f"Bounded search (ADR-026): {len(search_grid)} configurations, "
+            f"scored by {cv_folds}-fold GroupKFold CV RMSE"
+        )
+        params, cv, results = search_primary(
+            columns,
+            train_features,
+            y,
+            grid=search_grid,
+            seed=seed,
+            n_splits=cv_folds,
+            rul_cap=rul_cap,
+            echo=echo,
+        )
+        search = {
+            "scored_by": "cv_rmse_mean (tie-break cv_mae_mean)",
+            "n_configurations": len(results),
+            "grid": [r["params"] for r in results],
+            "results": [
+                {"params": r["params"], **{k: v for k, v in r["cv"].items() if k != "folds"}}
+                for r in results
+            ],
+            "selected_params": params,
+        }
+        echo(f"Selected configuration: {params}")
+    else:
+        params = dict(BASELINE_PARAMS)
+        cv = None
+    pipeline = make_model(model_name, columns, seed, params)
+    if cv is None:
+        cv = cross_validate(pipeline, train_features, y, cv_folds, rul_cap)
     echo(f"{cv_folds}-fold GroupKFold CV by unit (capped labels):")
     for fold in cv["folds"]:
         echo(
@@ -256,6 +331,8 @@ def run_training(
             for s in sensors
         },
         "health_bands": dict(HEALTH_BANDS),
+        "hyperparameters": params,
+        "search": search,
         "metrics": metrics,
     }
     model_path, metadata_path = save_artifacts(fitted, metadata, model_dir, model_name)
@@ -270,6 +347,8 @@ def run_training(
         "config",
         "required_sensors",
         "dropped_columns",
+        "hyperparameters",
+        "search",
         "metrics",
     )
     report = {key: metadata[key] for key in report_keys}
@@ -282,20 +361,31 @@ def run_training(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint used by ``scripts/train.py``. Returns a process exit code."""
+    """CLI entrypoint used by ``scripts/train.py``. Returns a process exit code.
+
+    Usage: ``--model baseline``, ``--model primary``, then ``--select``.
+    """
     settings = get_settings()
-    parser = argparse.ArgumentParser(description="Train and evaluate an FD001 RUL model.")
-    parser.add_argument("--model", choices=MODEL_NAMES, default="baseline")
+    parser = argparse.ArgumentParser(
+        description="Train/evaluate an FD001 RUL candidate (--model) or select and promote the "
+        "served model from trained candidates (--select, ADR-024)."
+    )
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--model", choices=MODEL_NAMES)
+    action.add_argument("--select", action="store_true")
     parser.add_argument("--data-dir", type=Path, default=settings.data_dir)
     parser.add_argument("--model-dir", type=Path, default=settings.model_dir)
     parser.add_argument("--reports-dir", type=Path, default=Path("reports"))
     args = parser.parse_args(argv)
     try:
-        run_training(
-            args.model, args.data_dir / "raw" / "CMAPSSData", args.model_dir, args.reports_dir
-        )
+        if args.select:
+            promote(args.model_dir, args.reports_dir)
+        else:
+            run_training(
+                args.model, args.data_dir / "raw" / "CMAPSSData", args.model_dir, args.reports_dir
+            )
     except (FileNotFoundError, ValueError, ChecksumMismatchError) as exc:
-        print(f"Training FAILED: {exc}", file=sys.stderr)
+        print(f"FAILED: {exc}", file=sys.stderr)
         return 1
     return 0
 

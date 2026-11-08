@@ -43,7 +43,7 @@ works end to end, and all acceptance criteria in [11](11_ACCEPTANCE_CRITERIA.md)
 - Subsets FD002–FD004 (multiple operating conditions / fault modes).
 - Anomaly-detection models (the project name reflects the platform direction; MVP delivers RUL only — see ADR-001).
 - Deep learning / sequence models (LSTM, CNN, Transformers).
-- Hyperparameter search beyond fixed, documented settings.
+- Hyperparameter search beyond the single bounded 12-configuration search of the primary model (ADR-026).
 - Cloud deployment, Kubernetes, authentication, multi-tenancy.
 - Drift monitoring, online retraining, experiment-tracking servers (MLflow).
 - Real (non-simulated) sensor data ingestion or streaming.
@@ -65,6 +65,6 @@ These are candidate extensions only after Milestone 7 and only via [15](15_CHANG
 ## 8. Success criteria
 
 - Official FD001 test-set MAE and RMSE are **measured and reported from actual runs** for both models (no target value is promised in advance; see [12](12_RISK_REGISTER.md) R4).
-- Primary model replaces the baseline only if it improves both test MAE and RMSE (ADR-010).
+- The served model is the candidate with the lower 5-fold GroupKFold CV RMSE (tie-break CV MAE); official test metrics are reported for both but do not drive the choice (ADR-024).
 - All tests pass locally and in CI; Docker Compose starts both services and the smoke test passes.
 - Every statement in README/docs is consistent with the code (verified in M7).

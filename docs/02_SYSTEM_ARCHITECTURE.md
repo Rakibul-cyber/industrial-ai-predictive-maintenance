@@ -26,7 +26,7 @@ flowchart LR
     FEAT --> CV[models.train<br/>GroupKFold(5) by unit]
     CV --> FIT[fit baseline + primary on full train]
     FIT --> EVAL[evaluate on test last cycle<br/>vs RUL_FD001]
-    EVAL --> SEL{ADR-010<br/>selection}
+    EVAL --> SEL{ADR-024<br/>selection by CV RMSE}
     SEL --> ART[(models/model.joblib<br/>models/model_metadata.json)]
   end
   subgraph Runtime["Runtime (docker compose)"]
@@ -51,14 +51,14 @@ flowchart LR
 3. Build features; keep training rows with `cycle ≥ window_size` (ADR-005).
 4. For each candidate (baseline, primary): 5-fold GroupKFold CV by `unit` → fold metrics.
 5. Fit each candidate on all training rows; predict the last row of each test unit; compute test MAE/RMSE/NASA score.
-6. Apply ADR-010; save the selected sklearn `Pipeline` + metadata (both candidates' metrics recorded).
+6. `scripts/train.py --select`: apply ADR-024 (CV RMSE); copy the winner to `model.joblib`, write `model_metadata.json` with the comparison of both candidates, and `reports/model_comparison.{json,md}`.
 
 ## 5. Inference flow (`POST /predict`)
 
 1. Pydantic validates the request shape and types (422 on failure).
 2. Service checks business rules against loaded metadata: required sensors present, ≥ `window_size` records, consecutive cycles (422 with specific codes).
 3. Records → DataFrame → `features.build` (same function as training) → last row.
-4. `models.predict.predict_rul` → clamp at 0 (ADR-018) → health band (ADR-017) → out-of-range warnings.
+4. `models.predict.predict_rul` → clamp to [0, RUL_CAP] (ADR-027) → health status (ADR-025) → out-of-range warnings.
 5. Response with `model_version` from metadata.
 
 The exact contract is in [06](06_API_SPECIFICATION.md); the function-level contract in [05](05_ML_DESIGN.md) §10.

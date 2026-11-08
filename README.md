@@ -2,7 +2,7 @@
 
 Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS **FD001** dataset, served through a FastAPI service and a Streamlit dashboard.
 
-**Status:** Milestones 1–2 implemented (data acquisition & validation; features + Ridge baseline with measured metrics in [reports/metrics_baseline.json](reports/metrics_baseline.json)); no primary model, API, or dashboard yet. A CI badge will be added once the GitHub Actions workflow has run on `main`. This README is finalised in Milestone 7.
+**Status:** Milestones 1–3 implemented: data acquisition & validation, features, Ridge baseline and HistGradientBoosting primary model, CV-based selection of the served model, and the inference contract. Measured results: [reports/model_comparison.md](reports/model_comparison.md). The API and dashboard are not built yet. A CI badge will be added once the workflow badge URL is confirmed on `main`. This README is finalised in Milestone 7.
 
 ## What it will do
 
@@ -12,7 +12,7 @@ Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS 
 - Show predictions and sensor trends in a dashboard that gets every result from the API.
 - Run both services with `docker compose up`.
 
-## Quickstart (current: Milestone 2)
+## Quickstart (current: Milestone 3)
 
 Requires Python 3.13 (`python3`) and network access to NASA's S3 bucket.
 
@@ -22,12 +22,14 @@ pip install -r requirements-dev.txt && pip install -e .
 cp .env.example .env                 # optional; defaults work without it
 python scripts/download_data.py      # downloads ~12 MB, verifies SHA-256, extracts to data/raw/CMAPSSData/
 python -m predmaint.data.validate    # checks the FD001 data contract (docs/04 §6)
-python scripts/train.py --model baseline   # CV + official test metrics; writes models/ and reports/
+python scripts/train.py --model baseline   # Ridge: CV + official test metrics → models/, reports/
+python scripts/train.py --model primary    # HistGradientBoosting: 12-config CV search (~80 s) + test metrics
+python scripts/train.py --select           # promote the lower-CV-RMSE model → models/model.joblib, reports/model_comparison.md
 ruff check . && ruff format --check .
 pytest -q                            # real-data tests run when data/raw/ is present
 ```
 
-The primary model, API, and dashboard arrive in Milestones 3–5 ([docs/08_IMPLEMENTATION_PLAN.md](docs/08_IMPLEMENTATION_PLAN.md)).
+The API and dashboard arrive in Milestones 4–5 ([docs/08_IMPLEMENTATION_PLAN.md](docs/08_IMPLEMENTATION_PLAN.md)).
 
 ## Planned stack
 

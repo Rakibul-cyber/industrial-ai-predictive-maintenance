@@ -9,7 +9,7 @@ Portfolio-grade, end-to-end ML system: RUL regression on NASA C-MAPSS **FD001**,
 - Modular monolith: package `src/predmaint/` with `data/`, `features/`, `models/`, `api/`, `dashboard/`; thin `scripts/`.
 - Python 3.13; exact pins in `requirements*.txt` (docs/03).
 - Target: `RUL = max_cycle − cycle`, clipped at 125 (configurable). Features: kept sensors (≤ 2 unique values dropped), trailing rolling mean/std over 30 cycles, plus `cycle`; settings excluded; only rows with `cycle ≥ 30`.
-- Baseline `StandardScaler + Ridge`; primary `HistGradientBoostingRegressor`. 5-fold GroupKFold by unit; official test at last cycle; MAE/RMSE primary, NASA score secondary. Primary ships only if test MAE **and** RMSE improve.
+- Baseline `StandardScaler + Ridge`; primary `HistGradientBoostingRegressor` from one bounded 12-config search (ADR-026). 5-fold GroupKFold by unit; official test at last cycle; MAE/RMSE primary, NASA score secondary. Served model = lower CV RMSE (ADR-024); test metrics reported, never used for selection. Predictions clamped to [0, RUL_CAP] (ADR-027); health status critical < 20 ≤ warning < 60 ≤ healthy (ADR-025).
 - Artifacts: `models/model.joblib` + `models/model_metadata.json`.
 - API: `GET /health`, `POST /predict`, `GET /model/info`, error envelope `{"error": {code, message, details}}`.
 - Dashboard calls the API over HTTP (`API_BASE_URL`), never imports `predmaint.models`.

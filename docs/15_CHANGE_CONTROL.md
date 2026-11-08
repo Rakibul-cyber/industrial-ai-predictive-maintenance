@@ -60,3 +60,15 @@ Append to the "Change records" section below **before** implementing, and get us
 | Affected docs | 01, 05, 07, 08, 09, 13, 14. |
 | Regression tests | `tests/test_train.py` (end-to-end save/reload/predict, pipeline feature list == metadata, missing feature column rejected), `tests/test_real_data.py` (sensor list). |
 | Approval | Requested by the user on 2026-11-08 (M2 authorization). |
+
+### CR-003 — Milestone 3 amendments: CV-based selection, health bands, bounded search, prediction cap (2026-11-08)
+
+| Field | Content |
+|---|---|
+| Reason | Explicit user request (§1.4) in the Milestone 3 authorization. |
+| Evidence | That message: (1) choose the served model by 5-fold GroupKFold CV RMSE (tie-break CV MAE); report test metrics without letting them drive the choice; flag CV/test ranking disagreement. (2) Health bands ≥ 60 healthy, 20–59 warning, < 20 critical, as constants in `config.py`. (3) One bounded HGB search of ≤ ~12 configurations scored by CV RMSE. (4) `predicted_rul` non-negative and capped at `RUL_CAP`. Measured effect of (4) on the baseline: one test prediction 130.58 > 125; test RMSE 19.205 → 19.144. |
+| Impact | ADR-010 → ADR-024; ADR-017 → ADR-025; ADR-007 amended by ADR-026; ADR-018 → ADR-027. API contract: `health_band` → `health_status` (lowercase), `cycles_received` added, `selected_over_baseline` → `selected_by`, error class names, cycle order checked as sent. 05, 06, 00, 01, 02, 04, 07, 09, 11, 12, CLAUDE.md. Baseline metrics re-measured. |
+| Smallest fix | New ADRs superseding the old ones (old text kept); selection in `models/selection.py`; shared clamp gains an upper bound; inference contract in `models/predict.py` (doc 07's location). |
+| Affected docs | 00, 01, 02, 04, 05, 06, 07, 08, 09, 11, 12, 13, 14, CLAUDE.md, README. |
+| Regression tests | `tests/test_selection.py`, `tests/test_inference_contract.py`, primary tests in `tests/test_train.py`, `tests/test_real_data.py` promoted-model RMSE. |
+| Approval | Requested by the user on 2026-11-08 (M3 authorization). |

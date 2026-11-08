@@ -10,13 +10,14 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Final
 
-# --- Model constants (ADR-004, ADR-005, ADR-017) --------------------------------------------
+# --- Model constants (ADR-004, ADR-005, ADR-025) --------------------------------------------
 DATASET_SUBSET: Final = "FD001"
 WINDOW_SIZE: Final = 30
 RUL_CAP: Final = 125
 RANDOM_SEED: Final = 42
 CV_FOLDS: Final = 5
-HEALTH_BANDS: Final = MappingProxyType({"critical_below": 30, "warning_below": 80})
+#: ADR-025: predicted RUL < 20 → "critical"; 20 ≤ RUL < 60 → "warning"; RUL ≥ 60 → "healthy".
+HEALTH_BANDS: Final = MappingProxyType({"critical_below": 20, "warning_below": 60})
 
 # --- Environment-driven settings -------------------------------------------------------------
 _DEFAULTS: Final = MappingProxyType(
