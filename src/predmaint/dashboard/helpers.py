@@ -172,11 +172,109 @@ def anomaly_badge(body: Mapping[str, Any] | None) -> tuple[str, str] | None:
 
 
 def anomaly_series_frame(body: Mapping[str, Any] | None) -> pd.DataFrame | None:
-    """``cycle, normalized_score`` rows from an ``/anomaly?include_series=true`` body, or None."""
+    """``cycle, normalized_score[, raw_normalized_score]`` rows from an
+    ``/anomaly?include_series=true`` body, or None. The raw column is added only when the API
+    served a smoothed score (ADR-038); with smoothing disabled (ADR-039) both are the raw score."""
     series = (body or {}).get("series")
     if not series:
         return None
-    return pd.DataFrame(series, columns=["cycle", "normalized_score"])
+    frame = pd.DataFrame(series)
+    columns = ["cycle", "normalized_score"]
+    if (
+        (body or {}).get("smoothed")
+        and "raw_normalized_score" in frame
+        and frame["raw_normalized_score"].notna().any()
+    ):
+        columns.append("raw_normalized_score")
+    return frame[columns]
+
+
+def anomaly_chart_caption(body: Mapping[str, Any]) -> str:
+    """Caption for the trajectory anomaly chart: names what is drawn and what is served."""
+    tail = " One /anomaly call on the full history; dashed line = threshold 1.0."
+    if body.get("smoothed"):
+        return (
+            "Bold: EWM-smoothed anomaly score (half-life 10 cycles) / its threshold, which sets "
+            "the anomaly flag; faint: raw score / raw threshold." + tail
+        )
+    if body.get("smoothed") is False:
+        return (
+            "Raw anomaly score (distance to the healthy reference / threshold), as served. "
+            "Smoothing was evaluated but is not served (FR-021 not met), so no smoothed line "
+            "is shown." + tail
+        )
+    return "Normalised anomaly score (distance to the healthy reference / threshold)." + tail
+
+
+def anomaly_caption(body: Mapping[str, Any]) -> str:
+    """Explorer text for an /anomaly body; names the smoothing when the API applied it."""
+    text = f"Anomaly score {body['normalized_score']:.2f}"
+    if body.get("smoothed"):
+        text += (
+            f" (smoothed over {body['cycles_in_smoothing']} cycles; raw "
+            f"{body['raw_normalized_score']:.2f}; > 1 = anomalous)"
+        )
+    else:
+        text += " (normalised; > 1 = anomalous)"
+    return text
+
+
+def anomaly_info_table(anomaly: Mapping[str, Any]) -> pd.DataFrame:
+    """Model-info anomaly table: raw (M9) column, plus a smoothed (ADR-038) column if present."""
+
+    def column(ev: Mapping[str, Any], threshold: float, met: bool, label: str) -> list[str]:
+        train = ev["train_oof"]
+        trend, fraction = train["trend"]["median"], train["detection"]["fraction_of_life"]
+        rul = train["detection"]["true_rul_at_detection"]["median"]
+        return [
+            f"{threshold:.3f}",
+            "—" if trend is None else f"{trend:.3f}",
+            f"{train['false_alarm_rate_healthy']:.3%}",
+            "—"
+            if fraction["median"] is None
+            else f"{fraction['median']:.0%} of life, true RUL {rul:.0f}",
+            f"{train['detection']['never_flagged_fraction']:.0%}",
+            f"{label}: {'met' if met else 'NOT met'}",
+        ]
+
+    index = [
+        "Threshold (OOF q0.99)",
+        "Trend median (train OOF)",
+        "False-alarm rate (healthy)",
+        "Median detection",
+        "Train engines never flagged",
+        "Acceptance (median trend > 0.7)",
+    ]
+    raw = anomaly.get("evaluation_raw")
+    if raw is None:  # pre-M11 API: headline fields only
+        fraction, rul = (
+            anomaly["detection_fraction_of_life_median"],
+            anomaly["detection_true_rul_median"],
+        )
+        trend = anomaly["trend_median_train_oof"]
+        values = [
+            f"{anomaly['threshold']:.3f}",
+            "—" if trend is None else f"{trend:.3f}",
+            f"{anomaly['false_alarm_rate_healthy']:.3%}",
+            "—" if fraction is None else f"{fraction:.0%} of life, true RUL {rul:.0f}",
+            f"{anomaly['never_flagged_fraction']:.0%}",
+            f"FR-019: {'met' if anomaly['acceptance_met'] else 'NOT met'}",
+        ]
+        return pd.DataFrame({"raw score": values}, index=index)
+    enabled = bool(anomaly.get("smoothing_enabled"))
+    raw_label = "raw score (M9)" if enabled else "raw score (M9, served)"
+    data = {raw_label: column(raw, anomaly["threshold"], anomaly["acceptance_met"], "FR-019")}
+    smoothed = anomaly.get("evaluation_smoothed")
+    if smoothed is not None:
+        halflife = (anomaly.get("smoothing") or {}).get("halflife")
+        state = "served" if enabled else "smoothed: evaluated, not served"
+        data[f"EWM half-life {halflife} ({state})"] = column(
+            smoothed,
+            anomaly["smoothed_threshold"],
+            bool(anomaly["smoothed_acceptance_met"]),
+            "FR-021",
+        )
+    return pd.DataFrame(data, index=index)
 
 
 def band_caption(intervals: Mapping[str, Any] | None) -> str:
@@ -185,3 +283,52 @@ def band_caption(intervals: Mapping[str, Any] | None) -> str:
     if (intervals or {}).get("calibrated") and q is not None:
         return f"Shaded: 80 % prediction interval (conformally calibrated, Q = {q:.2f}). "
     return "Shaded: 80 % prediction interval. "
+
+
+def interval_coverage_table(intervals: Mapping[str, Any]) -> pd.DataFrame:
+    """Model-info interval table: calibrated row first, uncalibrated (M8) row for comparison.
+
+    Without a ``calibration`` block (uncalibrated metadata) it shows the M8 out-of-fold and
+    test rows, as before M10.
+    """
+    cal = intervals.get("calibration")
+    if not cal:
+        return pd.DataFrame(
+            {
+                "Coverage (unclipped truth)": [
+                    f"{intervals[k]['coverage_unclipped']:.3f}" for k in ("cv_oof", "test")
+                ],
+                "Coverage (clipped truth)": [
+                    f"{intervals[k]['coverage_clipped']:.3f}" for k in ("cv_oof", "test")
+                ],
+                "Mean width": [f"{intervals[k]['mean_width']:.1f}" for k in ("cv_oof", "test")],
+            },
+            index=["CV out-of-fold", "Official test"],
+        )
+
+    def row(held_out: Mapping[str, Any], test: Mapping[str, Any]) -> list[str]:
+        return [
+            f"{held_out['coverage_clipped']:.3f}",
+            f"{held_out['mean_width']:.1f}",
+            f"{test['coverage_clipped']:.3f}",
+            f"{test['coverage_unclipped']:.3f}",
+            f"{test['mean_width']:.1f}",
+        ]
+
+    return pd.DataFrame(
+        [
+            row(cal["evaluation_half_after"], cal["test_after"]),
+            row(cal["evaluation_half_before"], cal["test_before"]),
+        ],
+        columns=[
+            "Held-out engines: coverage (clipped truth)",
+            "Held-out engines: mean width",
+            "Official test: coverage (clipped truth)",
+            "Official test: coverage (unclipped truth)",
+            "Official test: mean width",
+        ],
+        index=[
+            f"Calibrated (CQR, Q = {intervals['conformal_q']:.3f})",
+            "Uncalibrated (M8, for comparison)",
+        ],
+    )

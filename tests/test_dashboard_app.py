@@ -264,3 +264,58 @@ def test_app_renders_anomaly_fields(
         assert calls.count(True) == 1  # ONE series call for the whole trajectory
     else:
         assert not calls  # never called when the API reports no detector
+
+
+def test_app_renders_smoothed_and_raw_anomaly_series(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    health = {**HEALTH, "anomaly_loaded": True}
+    monkeypatch.setattr(ApiClient, "health", lambda self: ApiResult(True, 200, health))
+    monkeypatch.setattr(ApiClient, "model_info", lambda self: ApiResult(True, 200, INFO))
+    monkeypatch.setattr(ApiClient, "predict", lambda self, p: ApiResult(True, 200, _prediction(p)))
+
+    def anomaly(self: ApiClient, payload: dict[str, Any], include_series: bool = False):
+        body = _anomaly_body(payload, include_series)
+        n = len(payload["records"]) - 29
+        body |= {"smoothed": True, "cycles_in_smoothing": n, "raw_normalized_score": 1.3}
+        if include_series:
+            for point in body["series"]:
+                point["raw_normalized_score"] = point["normalized_score"] + 0.1
+        return ApiResult(True, 200, body)
+
+    monkeypatch.setattr(ApiClient, "anomaly", anomaly)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    assert not at.exception
+    assert any("smoothed over 6 cycles; raw 1.30" in c.value for c in at.caption)
+    at.button[0].click().run()
+    assert not at.exception
+    assert any(s.value == "Anomaly score over the engine's life" for s in at.subheader)
+    assert any("Bold: EWM-smoothed anomaly score" in c.value for c in at.caption)
+
+
+def test_app_shows_raw_only_when_smoothing_not_served(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-039: smoothed: false → raw-only chart and a caption that says smoothing is not served."""
+    health = {**HEALTH, "anomaly_loaded": True}
+    monkeypatch.setattr(ApiClient, "health", lambda self: ApiResult(True, 200, health))
+    monkeypatch.setattr(ApiClient, "model_info", lambda self: ApiResult(True, 200, INFO))
+    monkeypatch.setattr(ApiClient, "predict", lambda self, p: ApiResult(True, 200, _prediction(p)))
+
+    def anomaly(self: ApiClient, payload: dict[str, Any], include_series: bool = False):
+        body = _anomaly_body(payload, include_series)
+        body |= {"smoothed": False, "cycles_in_smoothing": None, "raw_normalized_score": 1.2}
+        if include_series:
+            for point in body["series"]:
+                point["raw_normalized_score"] = point["normalized_score"]
+        return ApiResult(True, 200, body)
+
+    monkeypatch.setattr(ApiClient, "anomaly", anomaly)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    assert not at.exception
+    assert any("Anomaly score 1.20 (normalised; > 1 = anomalous)" in c.value for c in at.caption)
+    at.button[0].click().run()
+    assert not at.exception
+    assert any("Smoothing was evaluated but is not served" in c.value for c in at.caption)

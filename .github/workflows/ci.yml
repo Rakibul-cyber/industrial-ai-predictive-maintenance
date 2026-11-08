@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history: test_real_data reads the M9 anomaly artifact via git show
 
       - uses: actions/setup-python@v7
         with:

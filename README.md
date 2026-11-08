@@ -1,6 +1,6 @@
 # Industrial AI — Predictive Maintenance Platform
 
-End-to-end remaining-useful-life (RUL) prediction for turbofan engines on NASA's C-MAPSS **FD001** benchmark: reproducible data acquisition, leakage-safe features, engine-grouped cross-validation, two models with a pre-registered selection rule, a FastAPI service, a Streamlit dashboard, Docker Compose and CI. On the official test set (100 engines, unclipped truth) the served **HistGradientBoosting** model reaches **RMSE 16.61 / MAE 12.57 cycles**, against **RMSE 19.14 / MAE 15.35** for the Ridge baseline. It was selected on 5-fold CV RMSE (16.56 vs 19.15), not on the test set. Since Milestone 8 each prediction also carries a nominal 80 % quantile-regression interval. Since Milestone 10 that interval is conformally calibrated on held-out engines, reaching 77.7 % coverage against the capped target (pre-registered band 77–83 %; see Results). Milestone 9 adds a minimal unsupervised anomaly score (`POST /anomaly`): it is implemented and evaluated without labels, but it **did not meet its own trend target** (see Results).
+End-to-end remaining-useful-life (RUL) prediction for turbofan engines on NASA's C-MAPSS **FD001** benchmark: reproducible data acquisition, leakage-safe features, engine-grouped cross-validation, two models with a pre-registered selection rule, a FastAPI service, a Streamlit dashboard, Docker Compose and CI. On the official test set (100 engines, unclipped truth) the served **HistGradientBoosting** model reaches **RMSE 16.61 / MAE 12.57 cycles**, against **RMSE 19.14 / MAE 15.35** for the Ridge baseline. It was selected on 5-fold CV RMSE (16.56 vs 19.15), not on the test set. Since Milestone 8 each prediction also carries a nominal 80 % quantile-regression interval. Since Milestone 10 that interval is conformally calibrated on held-out engines, reaching 77.7 % coverage against the capped target (pre-registered band 77–83 %; see Results). Milestone 9 adds a minimal unsupervised anomaly score (`POST /anomaly`): it is implemented and evaluated without labels, but it **did not meet its own trend target**. Milestone 11 tested one pre-registered remedy (smoothing). It did not meet the target and made detection worse, so it was rejected and the raw score is served (see Results).
 
 [![CI](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml/badge.svg)](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml)
 
@@ -105,10 +105,10 @@ curl -s -X POST localhost:8000/anomaly -H "Content-Type: application/json" -d @e
 ```
 
 ```json
-{"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-a25df0e","series":null}
+{"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-4734b37","raw_normalized_score":1.1015,"smoothed":false,"cycles_in_smoothing":null,"series":null}
 ```
 
-Add `?include_series=true` for the score at every full-window cycle. `GET /health` reports liveness, `model_loaded`, `intervals_loaded` and `anomaly_loaded`; `GET /model/info` reports the served model, selection rule and metrics. Every error uses one envelope `{"error": {"code", "message", "details"}}`. Contract: [docs/06_API_SPECIFICATION.md](docs/06_API_SPECIFICATION.md).
+The served score is the raw score (`smoothed: false`); the smoothing fields are present but inactive. Add `?include_series=true` for the score at every full-window cycle. `GET /health` reports liveness, `model_loaded`, `intervals_loaded` and `anomaly_loaded`; `GET /model/info` reports the served model, selection rule and metrics. Every error uses one envelope `{"error": {"code", "message", "details"}}`. Contract: [docs/06_API_SPECIFICATION.md](docs/06_API_SPECIFICATION.md).
 
 ## Results
 
@@ -128,13 +128,18 @@ The correction is calibrated on held-out engines, and the coverage target (0.80 
 
 **Anomaly detection (Milestone 9, unsupervised, no labels):** Mahalanobis distance of the 14 rolling-mean sensors from a healthy reference (training rows with true RUL ≥ 125; 5,329 rows from 90 engines), with the threshold set at the 99th percentile of out-of-fold healthy scores.
 
-| Measure (training engines, out-of-fold) | Value |
-|---|---|
-| Median per-engine trend: Spearman(score, cycle) | **0.680** (IQR 0.506–0.818); target was > 0.7 → **not met** |
-| False-alarm rate on healthy rows | 1.01 % |
-| First sustained detection (3 cycles above threshold), median | **76 % of life**, i.e. **49 cycles** of true RUL left (IQR 26–76) |
+**FR-019 not met; one remedy tested and rejected; raw score served.**
+- **M9, raw score:** median trend 0.680, target > 0.7, not met.
+- **M11, smoothed score:** one pre-registered remedy, a moving average (EWM) with a half-life of 10 cycles, fixed before computing and not tuned. Median trend 0.693, target > 0.7 with a false-alarm rate ≤ 2 %, **not met**. It also made detection worse, so it was **rejected**. The API serves the raw score, and the smoothing code and evaluation are kept as a documented negative result.
 
-On the test set, 75 % of engines with ≤ 20 cycles left are flagged at their last cycle and none with > 125. Read the score as a coarse health indicator next to the RUL prediction, not as a validated fault detector (evaluation report §10).
+| Measure (training engines, out-of-fold) | Raw score (M9, **served**) | Smoothed (M11, evaluated, not served) |
+|---|---|---|
+| Median per-engine trend: Spearman(score, cycle) | 0.680 (IQR 0.506–0.818) | 0.693 (IQR 0.394–0.857) |
+| False-alarm rate on healthy rows | 1.01 % | 1.01 % |
+| First sustained detection (3 cycles above threshold), median | **76 % of life**, **49 cycles** left | 79 % of life, 44 cycles left |
+| Engines never flagged | 2 % | 16 % |
+
+Smoothing barely moved the trend and made detection later and less complete. On the test set, 75 % (raw) / 69 % (smoothed) of engines with ≤ 20 cycles left are flagged at their last cycle, and none with > 125. Read the score as a coarse health indicator next to the RUL prediction, not as a validated fault detector (evaluation report §10).
 
 Test = official FD001 test set, last observed cycle of each of 100 engines, unclipped truth; RUL capped at 125 for training and predictions. CV and test rankings agree (`rankings_agree: true`). Full protocol, search grid, residuals by RUL range and limitations: **[docs/16_EVALUATION_REPORT.md](docs/16_EVALUATION_REPORT.md)**.
 
@@ -156,10 +161,10 @@ Full tree with one line per file: [docs/07_REPOSITORY_STRUCTURE.md](docs/07_REPO
 
 ## Testing and CI
 
-- **pytest:** 264 tests pass locally (2 opt-in tests skipped). Line coverage 96.14 %, enforced at **85 %** in `pyproject.toml`.
+- **pytest:** 285 tests pass locally (2 opt-in tests skipped). Line coverage 96.39 %, enforced at **85 %** in `pyproject.toml`.
 - **Markers:** `data` (runs when FD001 is present), `network` (`RUN_NETWORK_TESTS=1`), `docker` (`RUN_DOCKER_TESTS=1`).
 - **Kinds of test:** leakage tests (disjoint engine folds, causal features), an inference contract test (API output == offline prediction), the committed-artifact check (scikit-learn version pin, recorded predictions), and real-data tests that recompute the served model's test RMSE.
-- **CI** (GitHub Actions, `ubuntu-24.04`): `lint-test` (ruff + pytest with the coverage gate) and `docker` (`scripts/smoke_test.sh`: build, compose up, both healthchecks, a `/predict` on the late-life example incl. `rul_lower ≤ predicted_rul ≤ rul_upper` and `interval_calibrated`, `/anomaly` on both examples (late one anomalous, engine 1 scoring lower), teardown).
+- **CI** (GitHub Actions, `ubuntu-24.04`): `lint-test` (ruff + pytest with the coverage gate) and `docker` (`scripts/smoke_test.sh`: build, compose up, both healthchecks, a `/predict` on the late-life example incl. `rul_lower ≤ predicted_rul ≤ rul_upper` and `interval_calibrated`, `/anomaly` on both examples (raw score served, late one anomalous at 1.1015, engine 1 scoring lower), teardown).
 - Strategy: [docs/09_TESTING_STRATEGY.md](docs/09_TESTING_STRATEGY.md).
 
 ## Engineering decisions worth noticing
@@ -171,9 +176,9 @@ Full tree with one line per file: [docs/07_REPOSITORY_STRUCTURE.md](docs/07_REPO
 - **Uncertainty without touching the point model.** Two quantile models reuse the served model's pipeline and hyperparameters. The API falls back to null bounds when the interval artifact doesn't match the served model, and coverage is reported by RUL bucket, including where it fails. Conformal calibration (M10) reuses the out-of-fold predictions, is judged on held-out engines against a pre-registered target, and changes no model file. [ADR-034](docs/13_DECISION_LOG.md#adr-034--prediction-intervals-via-quantile-gradient-boosting-milestone-8), [ADR-037](docs/13_DECISION_LOG.md#adr-037--conformalized-quantile-regression-for-the-80--interval-milestone-10)
 - **Committed artifact with version checks.** The 451 KB model ships in git and in the image; scikit-learn is pinned, `/model/info` reports a version match, a test fails on drift, and retraining reproduces it byte-for-byte. [ADR-030](docs/13_DECISION_LOG.md#adr-030--commit-the-served-model-artifact-decides-m6-t4)
 
-- **Anomaly score evaluated without labels, and the miss reported.** The threshold comes from out-of-fold healthy scores, the evaluation asks whether the score tracks degradation, and the 0.7 trend target was fixed in advance. It came in at 0.680 and was reported, not tuned. [ADR-035](docs/13_DECISION_LOG.md#adr-035--minimal-anomaly-detection-mahalanobis-distance-to-a-healthy-reference-milestone-9)
+- **Anomaly score evaluated without labels, and the miss reported.** The threshold comes from out-of-fold healthy scores, the evaluation asks whether the score tracks degradation, and the 0.7 trend target was fixed in advance. It came in at 0.680. One pre-registered remedy (smoothing, M11) reached 0.693 and made detection worse, so it was rejected and the raw score is served. Both were reported, and nothing was tuned. [ADR-035](docs/13_DECISION_LOG.md#adr-035--minimal-anomaly-detection-mahalanobis-distance-to-a-healthy-reference-milestone-9)
 
-All 36 decisions (ADR-036 unused): [docs/13_DECISION_LOG.md](docs/13_DECISION_LOG.md).
+All 38 decisions (ADR-036 unused): [docs/13_DECISION_LOG.md](docs/13_DECISION_LOG.md).
 
 ## Limitations and future work
 
@@ -181,7 +186,7 @@ All 36 decisions (ADR-036 unused): [docs/13_DECISION_LOG.md](docs/13_DECISION_LO
 - Predictions are capped at 125 cycles: engines with longer true RUL are under-predicted, and early-life engines (e.g. test engine 1, true RUL 112) show the cap.
 - On the test set, predictions for engines with 21–60 cycles left are on average ~5 cycles **late** (optimistic).
 - The calibrated 80 % intervals cover 0.777 of held-out-engine rows against capped truth (just inside the pre-registered band, slightly below nominal), unevenly by RUL range, and cannot cover true RUL > 125; treat them as approximate. Health bands are illustrative.
-- The anomaly score missed its trend target (median 0.680 ≤ 0.7); test-engine trends are weak (median 0.213) because most test engines are cut off early in life. It has no fault labels to be validated against.
+- The anomaly score missed its trend target (0.680). The one pre-registered remedy, smoothing, reached 0.693 and detected later, so it was rejected and the raw score is served. test-engine trends are weak (median 0.213) because most test engines are cut off early in life. It has no fault labels to be validated against.
 - The pickled model is tied to the scikit-learn pin.
 - Candidate next steps, **not implemented**: FD002–FD004 with condition normalisation, conditional (per-RUL-range) interval calibration, bias correction, engine-specific anomaly baselines, drift monitoring. See [docs/16_EVALUATION_REPORT.md §8](docs/16_EVALUATION_REPORT.md).
 

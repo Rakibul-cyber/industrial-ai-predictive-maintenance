@@ -159,6 +159,9 @@ def test_committed_anomaly_reproduces_recorded_evaluation(
     assert fresh["threshold"] == committed["threshold"]
     assert fresh["for_model_version"] == committed["for_model_version"]
     assert json.loads(json.dumps(fresh["evaluation"])) == committed["evaluation"]
+    assert fresh["smoothing"] == committed["smoothing"]
+    assert fresh["smoothing_enabled"] is committed["smoothing_enabled"] is False  # ADR-039
+    assert json.loads(json.dumps(fresh["smoothed"])) == committed["smoothed"]
 
 
 def test_committed_calibration_reproduces_test_coverage(real_cmapss_dir: Path) -> None:
@@ -229,3 +232,67 @@ def test_committed_calibration_reproduces_from_oof(real_cmapss_dir: Path, tmp_pa
     )
     for name in ("lower", "upper"):
         assert np.array_equal(old[name].predict(rows), new[name].predict(rows)), name
+
+
+def test_anomaly_history_dependence_engine_34(real_cmapss_dir: Path) -> None:
+    """ADR-038: 60 vs 203 cycles of test engine 34 → same raw last-cycle score; the smoothed
+    score uses every full-window cycle sent (cycles_in_smoothing = cycles - 29)."""
+    from predmaint.models.predict import (
+        AnomalyModel,
+        anomaly_path_for,
+        load_anomaly_model,
+        score_anomaly,
+    )
+
+    model_path = get_settings().model_path
+    if not anomaly_path_for(model_path).is_file():
+        pytest.skip("no anomaly artifact (run scripts/train.py --model anomaly)")
+    clear_model_cache()
+    model, detector = load_model(model_path), load_anomaly_model(anomaly_path_for(model_path))
+    if detector.smoothing is None:
+        pytest.skip("anomaly metadata has no smoothing config")
+    # smoothing is evaluated but not served (ADR-039): exercise the retained implementation
+    detector = AnomalyModel(detector.detector, {**detector.metadata, "smoothing_enabled": True})
+    test = load_fd001(real_cmapss_dir).test
+    engine = test[test["unit"] == 34].reset_index(drop=True)
+    full, short = (
+        score_anomaly(engine, model, detector),
+        score_anomaly(engine.tail(60), model, detector),
+    )
+    assert (full.cycles_received, short.cycles_received) == (203, 60)
+    assert (full.cycles_in_smoothing, short.cycles_in_smoothing) == (174, 31)
+    assert full.raw_normalized_score == pytest.approx(short.raw_normalized_score, rel=1e-12)
+    assert full.last_cycle == short.last_cycle == 203
+
+
+def test_anomaly_detector_parameters_identical_to_m9(tmp_path: Path) -> None:
+    """ADR-038 does not refit the detector: compare with the M9 artifact from git history."""
+    import subprocess
+
+    import joblib
+    import numpy as np
+
+    from predmaint.models.predict import anomaly_path_for
+
+    current_path = anomaly_path_for(get_settings().model_path)
+    if not current_path.is_file():
+        pytest.skip("no anomaly artifact")
+    m9_path = tmp_path / "m9.joblib"
+    try:
+        blob = subprocess.run(
+            ["git", "show", "1e728ca:models/model_anomaly.joblib"],
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pytest.skip("M9 commit 1e728ca not available (shallow clone?)")
+    m9_path.write_bytes(blob)
+    m9, current = joblib.load(m9_path), joblib.load(current_path)
+    assert current["method"] == m9["method"] and current["features"] == m9["features"]
+    assert current["threshold"] == m9["threshold"]
+    for attr in ("mean_", "scale_"):
+        assert np.array_equal(getattr(current["scaler"], attr), getattr(m9["scaler"], attr))
+    for attr in ("covariance_", "location_", "precision_", "shrinkage_"):
+        assert np.array_equal(
+            getattr(current["covariance"], attr), getattr(m9["covariance"], attr)
+        ), attr

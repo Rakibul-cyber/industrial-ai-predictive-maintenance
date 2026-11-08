@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Docker smoke test (docs/09, M6/M8/M9/M10): build the image, start compose, wait for both
+# Docker smoke test (docs/09, M6/M8/M9/M10/M11): build the image, start compose, wait for both
 # healthchecks, check /health (model + intervals + anomaly loaded), POST the late-life example and
 # assert its recorded critical result, rul_lower <= predicted_rul <= rul_upper (ADR-034) and
 # interval_calibrated (ADR-037),
 # POST both examples to /anomaly and assert the late one is anomalous and scores above engine 1
-# (ADR-035), check the dashboard health endpoint, tear down. Exits non-zero on any failure.
+# (ADR-035) with the raw score served (smoothing disabled, ADR-039), check the dashboard health
+# endpoint, tear down.
+# Exits non-zero on any failure.
 #
 # Usage: bash scripts/smoke_test.sh   (needs docker compose, curl, python3)
 # Runs on its own host ports (default 18000/18501), so a running demo stack is not disturbed.
@@ -84,6 +86,10 @@ python3 - "$early" "$late" <<'PY' || fail "/anomaly results do not match expecta
 import json, sys
 early, late = json.loads(sys.argv[1]), json.loads(sys.argv[2])
 assert late["is_anomalous"] is True, late
+# ADR-039: smoothing evaluated but not served → raw score, as in M9 (sidecar value 1.1015)
+assert early["smoothed"] is False and late["smoothed"] is False, (early, late)
+assert late["cycles_in_smoothing"] is None, late
+assert late["normalized_score"] == late["raw_normalized_score"] == 1.1015, late
 assert early["normalized_score"] < late["normalized_score"], (early, late)
 PY
 

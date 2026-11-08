@@ -173,6 +173,7 @@ predict_rul(cycles: pd.DataFrame | Sequence[Mapping], model: LoadedModel,
 load_interval_model(path: Path | None = None) -> IntervalModel   # default: next to $MODEL_PATH (M8)
 order_bounds(point, lower, upper, rul_cap, conformal_q=None) -> (lower, upper, n_reordered)  # Q applied first (M10)
 load_anomaly_model(path: Path | None = None) -> AnomalyModel     # default: next to $MODEL_PATH (M9)
+ewm_smooth(values, halflife) -> np.ndarray                         # M11, ADR-038 (single EWM implementation)
 score_anomaly(cycles, model: LoadedModel, anomaly: AnomalyModel,
               include_series: bool = False) -> AnomalyResult    # M9, ADR-035
 health_status(rul: float) -> Literal["critical", "warning", "healthy"]
@@ -224,6 +225,18 @@ FR-020 (0.80 ± 0.03) is **met at the lower edge**. Rows of one engine are corre
 
 Full tables and what the evaluation does and does not prove: [16 §10](16_EVALUATION_REPORT.md). Source: `reports/metrics_anomaly.json`.
 
+**Smoothed score (M11, ADR-038), measured 2026-11-08T21:00:02Z.** Per engine, `ewm(halflife=10, adjust=True)` of the raw OOF distances (half-life fixed in advance); threshold = 99th percentile of the smoothed healthy OOF scores = **5.0906** (raw 5.4036). The detector object is unchanged: `model_anomaly.joblib` is byte-identical, and the scaler and covariance parameters equal the M9 artifact (tested). When enabled, inference smooths the request's full-window distances (`ewm_smooth`, one implementation) and reports `raw_normalized_score` and `cycles_in_smoothing`; it is disabled for serving since ADR-039.
+
+| Measure | Raw (M9; served) | Smoothed (evaluated in M11, not served — ADR-039) |
+|---|---|---|
+| Median per-engine trend, train OOF (IQR) | 0.680 (0.506–0.818) | **0.693** (0.394–0.857) |
+| False-alarm rate, healthy OOF rows | 0.0101 | 0.0101 |
+| Median detection: fraction of life / true RUL | 0.758 / 49.0 | 0.792 / 44.0 |
+| Train engines never flagged | 0.020 | 0.160 |
+| Test trend median | 0.213 | 0.344 |
+
+**FR-021 NOT MET** (trend 0.693 ≤ 0.7; false-alarm 0.0101 ≤ 0.02 met). 16 §10d has the full comparison. **ADR-039:** the remedy is rejected for serving; the metadata sets `smoothing_enabled: false`, so `score_anomaly` serves the raw score, and the smoothing path is kept and tested through an enabled variant.
+
 ## 11. Limitations
 
 - FD001 only: one operating condition and one fault mode; the model is not valid for other conditions.
@@ -232,5 +245,5 @@ Full tables and what the evaluation does and does not prove: [16 §10](16_EVALUA
 - The primary configuration was chosen by CV on the training set only, and selection is by CV, so the official test set stays a held-out report. The 12-configuration search still slightly favours the primary's CV estimate (best-of-12); its test RMSE (16.610) is close to its CV RMSE (16.559).
 - Rolling features need ≥ 30 cycles of history; younger engines cannot be scored.
 - Uncertainty: the 80 % intervals are conformally calibrated since M10 (held-out-engine coverage 0.777 against the capped target, still slightly below nominal; per-bucket coverage uneven, 21–60 at 0.687) and cannot cover true RUL > 125; health bands are illustrative thresholds, not engineering limits.
-- The M9 anomaly score is unsupervised: it measures distance from a population healthy reference, has no fault labels to validate against, and missed its trend target (0.680 ≤ 0.7).
+- The M9 anomaly score is unsupervised: it measures distance from a population healthy reference, has no fault labels to validate against, and missed its trend target both raw (0.680, FR-019) and smoothed with an EWM of half-life 10 (0.693, FR-021); smoothing flagged later and is therefore not served (ADR-039).
 - joblib artifacts are tied to the scikit-learn version (mismatch warning, 02 §7).

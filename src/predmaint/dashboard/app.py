@@ -18,12 +18,16 @@ from predmaint.dashboard.helpers import (
     TRAJECTORY_STEP,
     TrajectoryError,
     anomaly_badge,
+    anomaly_caption,
+    anomaly_chart_caption,
+    anomaly_info_table,
     anomaly_series_frame,
     band_caption,
     compute_trajectory,
     engine_history,
     engine_payload,
     interval_band,
+    interval_coverage_table,
     interval_text,
     sensor_chart_frame,
     units,
@@ -154,10 +158,7 @@ with explorer:
                     badge = anomaly_badge(scored.body if scored.ok else None)
                     if badge:
                         with mid:
-                            st.caption(
-                                f"Anomaly score {scored.body['normalized_score']:.2f} "
-                                "(normalised; > 1 = anomalous)"
-                            )
+                            st.caption(anomaly_caption(scored.body))
                             st.badge(badge[0], color=badge[1])  # type: ignore[arg-type]
                 st.caption(
                     f"cycles used: {result.body['cycles_used']} of {result.body['cycles_received']}"
@@ -281,20 +282,37 @@ with trajectory_tab:
                     series = anomaly_series_frame(scored)
                     if series is not None:
                         st.subheader("Anomaly score over the engine's life")
+                        has_raw = "raw_normalized_score" in series
+                        line_layers = [
+                            {
+                                "mark": {"type": "line", "opacity": 0.35, "strokeWidth": 1},
+                                "encoding": {
+                                    "x": {"field": "cycle", "type": "quantitative"},
+                                    "y": {
+                                        "field": "raw_normalized_score",
+                                        "type": "quantitative",
+                                        "title": "normalised score",
+                                    },
+                                },
+                            }
+                        ] * has_raw + [
+                            {
+                                "mark": {"type": "line", "strokeWidth": 2.5},
+                                "encoding": {
+                                    "x": {"field": "cycle", "type": "quantitative"},
+                                    "y": {
+                                        "field": "normalized_score",
+                                        "type": "quantitative",
+                                        "title": "normalised score",
+                                    },
+                                },
+                            }
+                        ]
                         st.vega_lite_chart(
                             series,
                             {
                                 "layer": [
-                                    {
-                                        "mark": {"type": "line"},
-                                        "encoding": {
-                                            "x": {"field": "cycle", "type": "quantitative"},
-                                            "y": {
-                                                "field": "normalized_score",
-                                                "type": "quantitative",
-                                            },
-                                        },
-                                    },
+                                    *line_layers,
                                     {
                                         "mark": {
                                             "type": "rule",
@@ -307,10 +325,7 @@ with trajectory_tab:
                             },
                             width="stretch",
                         )
-                        st.caption(
-                            "Normalised anomaly score (distance to the healthy reference / "
-                            "threshold) from one /anomaly call; dashed line = threshold 1.0."
-                        )
+                        st.caption(anomaly_chart_caption(scored))
                     else:
                         st.caption("Anomaly series unavailable.")
         elif not model_loaded:
@@ -366,54 +381,29 @@ with model_tab:
         intervals = info.body.get("intervals")
         if intervals:
             st.subheader("Prediction intervals")
-            st.table(
-                pd.DataFrame(
-                    {
-                        "Coverage (unclipped truth)": [
-                            f"{intervals[k]['coverage_unclipped']:.3f}" for k in ("cv_oof", "test")
-                        ],
-                        "Coverage (clipped truth)": [
-                            f"{intervals[k]['coverage_clipped']:.3f}" for k in ("cv_oof", "test")
-                        ],
-                        "Mean width": [
-                            f"{intervals[k]['mean_width']:.1f}" for k in ("cv_oof", "test")
-                        ],
-                    },
-                    index=["CV out-of-fold", "Official test"],
-                )
-            )
+            st.table(interval_coverage_table(intervals))
+            calibration = intervals.get("calibration")
             st.caption(
                 f"Nominal {intervals['interval_level']:.0%} interval (quantiles "
                 f"{intervals['quantiles']}) for model {intervals['for_model_version']}."
+                + (
+                    " Held-out engines: coverage on the evaluation half of the training engines, "
+                    "with Q computed on the other half (FR-020: "
+                    f"{'met' if calibration['acceptance_met'] else 'NOT met'}). "
+                    f"{calibration['caveat']}"
+                    if calibration
+                    else ""
+                )
             )
         else:
             st.caption("No prediction-interval artifact loaded; point predictions only.")
         anomaly = info.body.get("anomaly")
         if anomaly:
             st.subheader("Anomaly detector")
-            fraction = anomaly["detection_fraction_of_life_median"]
-            rul = anomaly["detection_true_rul_median"]
-            trend = anomaly["trend_median_train_oof"]
-            st.table(
-                pd.DataFrame(
-                    {
-                        "value": {
-                            "Method / version": f"{anomaly['method']} · {anomaly['model_version']}",
-                            "Threshold (OOF q0.99)": f"{anomaly['threshold']:.3f}",
-                            "Healthy reference rows": f"{anomaly['healthy_rows']:,}",
-                            "Trend median (train OOF)": "—" if trend is None else f"{trend:.3f}",
-                            "False-alarm rate (healthy)": (
-                                f"{anomaly['false_alarm_rate_healthy']:.3%}"
-                            ),
-                            "Median detection": "—"
-                            if fraction is None
-                            else f"{fraction:.0%} of life, true RUL {rul:.0f}",
-                            "Acceptance (median trend > 0.7)": "met"
-                            if anomaly["acceptance_met"]
-                            else "NOT met",
-                        }
-                    }
-                )
+            st.table(anomaly_info_table(anomaly))
+            st.caption(
+                f"{anomaly['method']} · {anomaly['model_version']} · "
+                f"{anomaly['healthy_rows']:,} healthy reference rows."
             )
         st.subheader("Metrics")
         st.table(

@@ -11,12 +11,16 @@ from predmaint.dashboard.api_client import ApiResult
 from predmaint.dashboard.helpers import (
     TrajectoryError,
     anomaly_badge,
+    anomaly_caption,
+    anomaly_chart_caption,
+    anomaly_info_table,
     anomaly_series_frame,
     band_caption,
     compute_trajectory,
     engine_history,
     engine_payload,
     interval_band,
+    interval_coverage_table,
     interval_text,
     sensor_chart_frame,
     trajectory_cycles,
@@ -190,3 +194,123 @@ def test_band_caption_names_conformal_q() -> None:
     assert band_caption(None) == plain
     assert band_caption({"calibrated": False, "conformal_q": None}) == plain
     assert band_caption({"calibrated": True, "conformal_q": None}) == plain
+
+
+def _cov(clipped: float, unclipped: float, width: float) -> dict[str, float]:
+    return {"coverage_clipped": clipped, "coverage_unclipped": unclipped, "mean_width": width}
+
+
+def test_interval_coverage_table_calibrated_and_fallback() -> None:
+    calibrated = {
+        "conformal_q": 1.7418749,
+        "cv_oof": _cov(0.737, 0.509, 37.2),
+        "test": _cov(0.82, 0.74, 42.1),
+        "calibration": {
+            "evaluation_half_after": _cov(0.7768, 0.536, 39.19),
+            "evaluation_half_before": _cov(0.7339, 0.504, 37.15),
+            "test_after": _cov(0.85, 0.75, 44.74),
+            "test_before": _cov(0.82, 0.74, 42.13),
+        },
+    }
+    table = interval_coverage_table(calibrated)
+    assert list(table.index) == [
+        "Calibrated (CQR, Q = 1.742)",
+        "Uncalibrated (M8, for comparison)",
+    ]
+    assert table.iloc[0].tolist() == ["0.777", "39.2", "0.850", "0.750", "44.7"]
+    assert table.iloc[1].tolist() == ["0.734", "37.1", "0.820", "0.740", "42.1"]
+    old = interval_coverage_table({**calibrated, "calibration": None})
+    assert list(old.index) == ["CV out-of-fold", "Official test"]
+    assert old.loc["CV out-of-fold", "Coverage (clipped truth)"] == "0.737"
+
+
+def test_anomaly_series_frame_with_raw_column() -> None:
+    body = {
+        "smoothed": True,
+        "series": [
+            {"cycle": 30, "normalized_score": 0.7, "raw_normalized_score": 0.66},
+            {"cycle": 31, "normalized_score": 0.72, "raw_normalized_score": 0.9},
+        ],
+    }
+    frame = anomaly_series_frame(body)
+    assert list(frame.columns) == ["cycle", "normalized_score", "raw_normalized_score"]
+    assert frame["raw_normalized_score"].tolist() == [0.66, 0.9]
+    no_raw = {"series": [{"cycle": 30, "normalized_score": 0.7, "raw_normalized_score": None}]}
+    assert list(anomaly_series_frame(no_raw).columns) == ["cycle", "normalized_score"]
+    disabled = {**body, "smoothed": False}  # ADR-039: both columns are the raw score
+    assert list(anomaly_series_frame(disabled).columns) == ["cycle", "normalized_score"]
+
+
+def test_anomaly_chart_caption_states_what_is_served() -> None:
+    assert anomaly_chart_caption({"smoothed": True}).startswith("Bold: EWM-smoothed")
+    disabled = anomaly_chart_caption({"smoothed": False})
+    assert "as served" in disabled and "evaluated but is not served" in disabled
+    assert anomaly_chart_caption({}).startswith("Normalised anomaly score")
+
+
+def test_anomaly_caption_smoothed_and_raw() -> None:
+    smoothed = {
+        "normalized_score": 1.0472,
+        "smoothed": True,
+        "cycles_in_smoothing": 174,
+        "raw_normalized_score": 1.1015,
+    }
+    assert anomaly_caption(smoothed) == (
+        "Anomaly score 1.05 (smoothed over 174 cycles; raw 1.10; > 1 = anomalous)"
+    )
+    assert anomaly_caption({"normalized_score": 0.6657}) == (
+        "Anomaly score 0.67 (normalised; > 1 = anomalous)"
+    )
+
+
+def _evaluation(trend: float, false_alarm: float, never: float) -> dict[str, Any]:
+    return {
+        "train_oof": {
+            "trend": {"median": trend},
+            "false_alarm_rate_healthy": false_alarm,
+            "detection": {
+                "fraction_of_life": {"median": 0.758},
+                "true_rul_at_detection": {"median": 49.0},
+                "never_flagged_fraction": never,
+            },
+        }
+    }
+
+
+def test_anomaly_info_table_side_by_side_and_fallback() -> None:
+    anomaly = {
+        "threshold": 5.4036,
+        "acceptance_met": False,
+        "smoothing": {"method": "ewm", "halflife": 10, "adjust": True},
+        "smoothing_enabled": False,
+        "smoothed_threshold": 5.0906,
+        "smoothed_acceptance_met": False,
+        "evaluation_raw": _evaluation(0.680, 0.0101, 0.02),
+        "evaluation_smoothed": _evaluation(0.693, 0.0101, 0.16),
+    }
+    table = anomaly_info_table(anomaly)
+    assert list(table.columns) == [
+        "raw score (M9, served)",
+        "EWM half-life 10 (smoothed: evaluated, not served)",
+    ]
+    enabled = anomaly_info_table({**anomaly, "smoothing_enabled": True})
+    assert list(enabled.columns) == ["raw score (M9)", "EWM half-life 10 (served)"]
+    assert table.loc["Trend median (train OOF)"].tolist() == ["0.680", "0.693"]
+    assert table.loc["Train engines never flagged"].tolist() == ["2%", "16%"]
+    assert table.loc["Acceptance (median trend > 0.7)"].tolist() == [
+        "FR-019: NOT met",
+        "FR-021: NOT met",
+    ]
+    m9 = {
+        "threshold": 5.4036,
+        "acceptance_met": False,
+        "trend_median_train_oof": None,
+        "false_alarm_rate_healthy": 0.0101,
+        "detection_fraction_of_life_median": None,
+        "detection_true_rul_median": None,
+        "never_flagged_fraction": 0.02,
+    }
+    old = anomaly_info_table(m9)
+    assert list(old.columns) == ["raw score"]
+    assert old.loc["Trend median (train OOF)", "raw score"] == "—"
+    assert old.loc["Median detection", "raw score"] == "—"

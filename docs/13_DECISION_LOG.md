@@ -39,8 +39,10 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-033 | Project renamed "Industrial AI — Predictive Maintenance Platform"; anomaly detection stays an unauthorized extension | Accepted (2026-11-08, user-directed, CR-007) |
 | ADR-034 | Prediction intervals: two quantile HGB models (q0.1/q0.9), separate artifact, graceful fallback | Accepted (2026-11-08, user-directed, CR-008) |
 | ADR-035 | Minimal anomaly detection: Mahalanobis distance to a healthy reference, OOF threshold | Accepted (2026-11-08, user-directed, CR-010) |
-| ADR-036 | *Unused.* Reserved in M9 for restoring the full project title if FR-019 were met; it was not met, so no ADR-036 exists. | — |
+| ADR-036 | *Unused.* Reserved for restoring the full project title if FR-019 (M9) or FR-021 (M11) were met; neither was, so no ADR-036 exists. | — |
 | ADR-037 | Conformalized quantile regression (CQR) for the 80 % interval; one additive correction Q from OOF predictions | Accepted (2026-11-08, user-directed, CR-011) |
+| ADR-038 | Smoothed anomaly score: per-engine EWM (half-life 10, fixed in advance) of the Mahalanobis distance, OOF smoothed threshold | Accepted (2026-11-08, user-directed, CR-012); **serving clause superseded by ADR-039** |
+| ADR-039 | Serve the raw anomaly score; keep smoothing as a disabled, documented experiment (`smoothing_enabled: false`) | Accepted (2026-11-09, user-directed, CR-012 close-out) |
 
 ---
 
@@ -340,3 +342,35 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Rationale:** one parameter, no new dependency, no retraining, reuses predictions the pipeline already makes, and is the documented fix from 16 §9.
 - **Consequences:** intervals widen by Q everywhere (before clamping); the > 125 structural zero against unclipped truth is unchanged; retraining order unchanged (`--select`, then `--model intervals`, which now also calibrates).
 - **Outcome (M10, 2026-11-08):** Q_eval = 1.320 (50 calibration engines) → evaluation-half coverage 0.734 → **0.777** (capped target): FR-020 met at the lower edge of the band. Q_final = 1.742 (all 17,731 OOF rows) ships. Test coverage 0.820 → 0.850 (capped), 0.740 → 0.750 (unclipped). Q is positive, so no interval narrowed. Q_eval < Q_final and the evaluation half still sits below 0.80, which is the engine-level (non-exchangeable) effect named in the caveat.
+
+### ADR-038 — Smoothed anomaly score: EWM with a pre-registered half-life (Milestone 11)
+
+- **Context:** CR-012. The raw M9 score missed FR-019 (median train-OOF trend 0.680 ≤ 0.7). The authorization tests one remedy for the score's cycle-to-cycle noise.
+- **Decision:**
+  - **Smoothing:** per engine, `pandas.Series.ewm(halflife=10, adjust=True).mean()` over the per-cycle Mahalanobis distances (raw, before normalisation), in cycle order, starting at the first full-window cycle. Half-life **10 cycles**, fixed in advance; no other value is tried.
+  - **Threshold:** the 99th percentile of the **smoothed** healthy-reference scores from the same out-of-fold procedure as M9 (5-fold GroupKFold by engine; smoothing applied per engine to that engine's OOF scores). `normalized_score = smoothed / smoothed_threshold`; `is_anomalous = normalized_score > 1`. The raw threshold is kept and reported.
+  - **Unchanged:** scaler, Ledoit-Wolf covariance, feature list, raw threshold. The detector object in `model_anomaly.joblib` is not modified; the smoothing config and smoothed threshold live in the metadata (`smoothing`, `smoothed`), like `conformal_q` in ADR-037. Fitted parameters are verified identical to the M9 artifact. Metadata without `smoothing` → M9 behaviour (`smoothed: false`).
+  - **Evaluation:** all five M9 metrics for the smoothed score next to the raw score (train OOF and test, same buckets), plus the test-trend breakdown by true RUL at cutoff (≤ 60, 61–125, > 125) for both scores.
+  - **Pre-registered acceptance (FR-021):** median per-engine Spearman(smoothed score, cycle) on train OOF **> 0.7** AND false-alarm rate on healthy OOF rows (smoothed threshold) **≤ 0.02**. Both must hold.
+  - **API (additive):** `/anomaly` gains `raw_normalized_score`, `smoothed`, `cycles_in_smoothing`; series entries gain `raw_normalized_score`; `anomaly_score`/`threshold`/`normalized_score`/`is_anomalous` refer to the smoothed score when smoothing is configured. `/model/info.anomaly` gains the smoothing config and both evaluations. `api_version` 0.5.0.
+- **Known in advance (stated before computing):**
+  - The false-alarm condition is close to automatic: the threshold is the 99th percentile of the same OOF healthy rows, so the rate is ≈ 0.01 by construction (M9 raw: 0.0101). The trend condition is the binding one.
+  - Smoothing removes cycle-to-cycle noise, so a per-engine rank correlation with cycle rises whenever a trend exists; it adds no information that the raw series lacks. Smoothing also adds lag, so detection can only come at or after the raw detection for the same threshold logic.
+  - **History dependence:** the smoothed last-cycle score depends on how many cycles the client sends (EWM memory). Clients should send the full available history; `cycles_in_smoothing` reports how many full-window cycles were smoothed.
+- **Alternatives:** other half-lives or a search over them (tuning against the acceptance metric, excluded); a rolling median; refitting the detector on smoothed features (changes the detector).
+- **Rationale:** one parameter, fixed in advance, no new dependency, detector untouched.
+- **Consequences:** if FR-021 is met, the title may be restored via ADR-036 (reserved); if not, the title stays and both attempts are reported.
+- **Outcome (M11, 2026-11-08):** smoothed threshold 5.0906 (raw 5.4036). FR-021 **NOT MET**: trend median 0.693 ≤ 0.7, false-alarm 0.0101 ≤ 0.02. Smoothing also delayed detection (never flagged 0.160 vs 0.020). Title unchanged; ADR-036 stays unused. Per the authorization the served `is_anomalous` uses the smoothed score; removing `smoothing`/`smoothed` from the metadata restores the M9 behaviour.
+
+### ADR-039 — Serve the raw anomaly score; smoothing retained as a disabled experiment (Milestone 11 close-out)
+
+- **Context:** ADR-038's remedy did not meet FR-021 (smoothed trend median 0.693 ≤ 0.7), and it made detection worse: training engines never flagged rose from 2 % to 16 %, median RUL at first detection fell from 49 to 44 cycles, and fewer near-failure test engines were flagged (0–20: 0.750 → 0.688; 21–60: 0.391 → 0.348).
+- **Decision:** supersedes ADR-038's **serving** clause.
+  - `/anomaly` serves the **raw** normalised score for `is_anomalous`, as in M9.
+  - The anomaly metadata carries an explicit `smoothing_enabled: false`, written by `scripts/train.py --model anomaly` (`SMOOTHING_ENABLED = False` in `models/anomaly.py`). It is a flag rather than deleting the keys, so the smoothing config, smoothed threshold and smoothed evaluation stay in the metadata, the report and `/model/info.anomaly` as a documented negative result.
+  - The smoothing implementation (`ewm_smooth`, `smooth_per_engine`, side-by-side evaluation) stays in code and is tested through an explicitly enabled variant.
+  - Response fields `smoothed` (false), `cycles_in_smoothing` (null) and `raw_normalized_score` (= `normalized_score`) remain present but inactive.
+  - Dashboard: badge and caption use the served raw score. The trajectory chart shows the raw line only, because the series carries no separate smoothed values when smoothing is disabled, and its caption says so. The model-info table labels the smoothed column "smoothed: evaluated, not served".
+- **Alternatives:** delete the smoothing keys (loses the negative result from the served metadata); keep serving the smoothed score (worse detection, no criterion met).
+- **Rationale:** serve the score with the better measured detection behaviour; keep the evidence of the rejected remedy reproducible.
+- **Consequences:** the history dependence of ADR-038 no longer applies to served responses. Metadata without the flag but with a `smoothing` config (M11 before this ADR) is still treated as enabled, so the flag must stay in the metadata. The detector and its artifact are unchanged.

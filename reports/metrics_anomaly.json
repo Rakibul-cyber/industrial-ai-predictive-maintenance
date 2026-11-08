@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "artifact": "model_anomaly",
-  "model_version": "anomaly-20261108-a25df0e",
+  "model_version": "anomaly-20261108-4734b37",
   "method": "mahalanobis_ledoitwolf",
   "for_model_version": "primary-20261108-f4c86df",
   "threshold": 5.40363364967852,
@@ -9,8 +9,8 @@
   "healthy_reference": "rows with a full 30-cycle window and true RUL >= 125",
   "healthy_min_rul": 125,
   "healthy_rows": 5329,
-  "trained_at": "2026-11-08T19:33:06Z",
-  "git_sha": "a25df0e1dcb842c9259a24b9f533b54105cb1881",
+  "trained_at": "2026-11-08T23:15:07Z",
+  "git_sha": "4734b370a609be53940253b77fd774fc830f87ad",
   "git_dirty": true,
   "python_version": "3.13.3",
   "library_versions": {
@@ -93,7 +93,24 @@
           }
         ]
       },
-      "spearman_with_rul_prediction": -0.6129811370598759
+      "spearman_with_rul_prediction": -0.6129811370598759,
+      "trend_by_true_rul": [
+        {
+          "true_rul_group": "<=60",
+          "n_engines_scored": 39,
+          "median": 0.5166169289202387
+        },
+        {
+          "true_rul_group": "61-125",
+          "n_engines_scored": 49,
+          "median": 0.040280661928776884
+        },
+        {
+          "true_rul_group": ">125",
+          "n_engines_scored": 11,
+          "median": -0.32016717443371334
+        }
+      ]
     },
     "acceptance": {
       "criterion": "median per-engine Spearman(score, cycle) on train OOF > 0.7",
@@ -122,7 +139,111 @@
       "in_sample_threshold_all_healthy_rows": 5.150996217252409
     }
   },
+  "smoothing": {
+    "method": "ewm",
+    "halflife": 10,
+    "adjust": true
+  },
+  "smoothing_enabled": false,
+  "smoothed": {
+    "threshold": 5.090594528745487,
+    "threshold_check": {
+      "oof_threshold": 5.090594528745487,
+      "raw_oof_threshold": 5.40363364967852,
+      "smoothed_below_raw": true
+    },
+    "evaluation": {
+      "train_oof": {
+        "trend": {
+          "n_engines": 100,
+          "n_engines_scored": 100,
+          "median": 0.6932026975469261,
+          "p25": 0.39357934496182345,
+          "p75": 0.856945558677741,
+          "share_above_0_7": 0.47
+        },
+        "false_alarm_rate_healthy": 0.010133233252017265,
+        "n_healthy_rows": 5329,
+        "detection": {
+          "consecutive_cycles": 3,
+          "n_engines": 100,
+          "never_flagged_fraction": 0.16,
+          "fraction_of_life": {
+            "median": 0.7917993212748837,
+            "p25": 0.7159136517401525,
+            "p75": 0.8660965653153153
+          },
+          "true_rul_at_detection": {
+            "median": 44.0,
+            "p25": 27.25,
+            "p75": 62.5
+          }
+        }
+      },
+      "test": {
+        "trend": {
+          "n_engines": 100,
+          "n_engines_scored": 99,
+          "median": 0.3437330439500815,
+          "p25": -0.322253291496814,
+          "p75": 0.6820010682044378,
+          "share_above_0_7": 0.2222222222222222
+        },
+        "trend_by_true_rul": [
+          {
+            "true_rul_group": "<=60",
+            "n_engines_scored": 39,
+            "median": 0.529676494613381
+          },
+          {
+            "true_rul_group": "61-125",
+            "n_engines_scored": 49,
+            "median": 0.29845522898154475
+          },
+          {
+            "true_rul_group": ">125",
+            "n_engines_scored": 11,
+            "median": -0.312504395917627
+          }
+        ],
+        "flagged_at_last_cycle": {
+          "overall": 0.23,
+          "buckets": [
+            {
+              "true_rul_bucket": "0-20",
+              "n": 16,
+              "flagged_fraction": 0.6875
+            },
+            {
+              "true_rul_bucket": "21-60",
+              "n": 23,
+              "flagged_fraction": 0.34782608695652173
+            },
+            {
+              "true_rul_bucket": "61-125",
+              "n": 50,
+              "flagged_fraction": 0.08
+            },
+            {
+              "true_rul_bucket": ">125",
+              "n": 11,
+              "flagged_fraction": 0.0
+            }
+          ]
+        },
+        "spearman_with_rul_prediction": -0.5684565510273141
+      },
+      "acceptance": {
+        "criterion": "median per-engine Spearman(smoothed score, cycle) on train OOF > 0.7 AND false-alarm rate on healthy OOF rows <= 0.02",
+        "trend_value": 0.6932026975469261,
+        "trend_met": false,
+        "false_alarm_value": 0.010133233252017265,
+        "false_alarm_met": true,
+        "met": false
+      }
+    }
+  },
   "timings_seconds": {
-    "oof_evaluation": 0.06
+    "oof_evaluation": 0.07
   }
 }

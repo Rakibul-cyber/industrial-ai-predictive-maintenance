@@ -184,10 +184,16 @@ class IntervalsInfo(BaseModel):
 class AnomalySeriesPoint(BaseModel):
     cycle: int
     normalized_score: float
+    raw_normalized_score: float | None = None
 
 
 class AnomalyResponse(BaseModel):
-    """Anomaly score at the last cycle (ADR-035); ``series`` only with ``include_series=true``."""
+    """Anomaly score at the last cycle (ADR-035; smoothed since ADR-038).
+
+    With smoothing, ``anomaly_score``, ``threshold``, ``normalized_score`` and ``is_anomalous``
+    refer to the EWM-smoothed score, which depends on how many cycles are sent: send the
+    engine's full available history. ``series`` only with ``include_series=true``.
+    """
 
     model_config = ConfigDict(
         protected_namespaces=(),
@@ -208,11 +214,23 @@ class AnomalyResponse(BaseModel):
 
     unit_id: str | None
     last_cycle: int
-    anomaly_score: float = Field(description="Mahalanobis distance to the healthy reference.")
+    anomaly_score: float = Field(
+        description="Mahalanobis distance to the healthy reference; EWM-smoothed when "
+        "`smoothed` is true."
+    )
     normalized_score: float = Field(description="anomaly_score / threshold; > 1 is anomalous.")
     threshold: float
     is_anomalous: bool
     model_version: str
+    raw_normalized_score: float | None = Field(
+        default=None, description="Unsmoothed distance / raw threshold at the last cycle."
+    )
+    smoothed: bool = False
+    cycles_in_smoothing: int | None = Field(
+        default=None,
+        description="Full-window cycles the EWM was computed over (cycles sent - 29); "
+        "null without smoothing.",
+    )
     series: list[AnomalySeriesPoint] | None = None
 
 
@@ -234,6 +252,16 @@ class AnomalyInfo(BaseModel):
     detection_true_rul_median: float | None
     never_flagged_fraction: float
     acceptance_met: bool
+    smoothing: dict[str, Any] | None = None
+    smoothing_enabled: bool = Field(
+        default=False,
+        description="Whether /anomaly serves the smoothed score (false since ADR-039: "
+        "smoothing evaluated, not served).",
+    )
+    smoothed_threshold: float | None = None
+    smoothed_acceptance_met: bool | None = None
+    evaluation_raw: dict[str, Any] | None = None
+    evaluation_smoothed: dict[str, Any] | None = None
 
 
 class ModelInfoResponse(BaseModel):

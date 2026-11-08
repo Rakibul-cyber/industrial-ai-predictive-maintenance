@@ -391,8 +391,13 @@ def test_anomaly_matches_score_anomaly(
         "threshold": round(direct.threshold, 4),
         "is_anomalous": direct.is_anomalous,
         "model_version": direct.model_version,
+        "raw_normalized_score": round(direct.raw_normalized_score, 4),
+        "smoothed": False,
+        "cycles_in_smoothing": None,
         "series": None,
     }
+    body = response.json()
+    assert body["normalized_score"] == body["raw_normalized_score"]  # raw served (ADR-039)
 
 
 def test_anomaly_series(client: TestClient, payload: dict[str, Any]) -> None:
@@ -528,3 +533,29 @@ def test_uncalibrated_interval_metadata_serves_v1_1_bounds(
     assert body["predicted_rul"] == calibrated["predicted_rul"]
     assert info["calibrated"] is False and info["conformal_q"] is None
     assert info["calibration"] is None
+
+
+# --- smoothed anomaly score (ADR-038, M11) --------------------------------------------------
+def test_anomaly_series_serves_raw_scores(client: TestClient, payload: dict[str, Any]) -> None:
+    """ADR-039: smoothing disabled → series and top-level values are the raw score."""
+    body = client.post("/anomaly?include_series=true", json=payload).json()
+    assert body["smoothed"] is False and body["cycles_in_smoothing"] is None
+    assert len(body["series"]) == 11
+    assert set(body["series"][0]) == {"cycle", "normalized_score", "raw_normalized_score"}
+    assert all(p["normalized_score"] == p["raw_normalized_score"] for p in body["series"])
+    assert body["series"][-1]["normalized_score"] == body["normalized_score"]
+
+
+def test_model_info_reports_both_anomaly_evaluations(
+    client: TestClient, served_model_dir: Path
+) -> None:
+    meta = json.loads((served_model_dir / "models" / "model_anomaly_metadata.json").read_text())
+    info = client.get("/model/info").json()["anomaly"]
+    assert info["smoothing"] == {"method": "ewm", "halflife": 10, "adjust": True}
+    assert info["smoothing_enabled"] is False
+    assert info["smoothed_threshold"] == meta["smoothed"]["threshold"]
+    assert info["threshold"] == meta["threshold"]
+    assert info["evaluation_raw"] == meta["evaluation"]
+    assert info["evaluation_smoothed"] == meta["smoothed"]["evaluation"]
+    expected = meta["smoothed"]["evaluation"]["acceptance"]["met"]
+    assert info["smoothed_acceptance_met"] is expected

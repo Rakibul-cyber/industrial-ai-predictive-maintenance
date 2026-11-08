@@ -1,6 +1,6 @@
 # 16 — Evaluation Report
 
-All numbers in this report are read from the committed files [`reports/metrics_anomaly.json`](../reports/metrics_anomaly.json) (§10), [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) (§9), [`reports/metrics_baseline.json`](../reports/metrics_baseline.json), [`reports/metrics_primary.json`](../reports/metrics_primary.json), [`reports/model_comparison.json`](../reports/model_comparison.json), [`reports/residuals_by_rul_bucket.json`](../reports/residuals_by_rul_bucket.json) and [`models/model_metadata.json`](../models/model_metadata.json); the document was generated from them in Milestone 7. The served model is `primary-20261108-f4c86df`.
+All numbers in this report are read from the committed files [`reports/metrics_anomaly.json`](../reports/metrics_anomaly.json) (§10, smoothed §10d), [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) (§9), [`reports/metrics_baseline.json`](../reports/metrics_baseline.json), [`reports/metrics_primary.json`](../reports/metrics_primary.json), [`reports/model_comparison.json`](../reports/model_comparison.json), [`reports/residuals_by_rul_bucket.json`](../reports/residuals_by_rul_bucket.json) and [`models/model_metadata.json`](../models/model_metadata.json); the document was generated from them in Milestone 7. The served model is `primary-20261108-f4c86df`.
 
 ## 1. Dataset and protocol
 
@@ -93,7 +93,7 @@ None of the following is part of the MVP. Each would need its own change record 
 | Extension (NOT IMPLEMENTED) | What it would need |
 |---|---|
 | FD002–FD004 (multiple conditions / fault modes) | Operating-condition normalisation (per-regime sensor scaling), regime-aware features, re-validated data contract and checksums, larger evaluation |
-| ~~Anomaly detection~~ — **IMPLEMENTED in M9** (§10, ADR-035); trend target not met | Remaining: engine-specific baselines, a detection-timing target agreed in advance, evaluation on data with labelled faults |
+| ~~Anomaly detection~~ — **IMPLEMENTED in M9** (§10, ADR-035); trend target not met raw (M9); smoothing remedy not met and rejected (M11, §10d); raw score served | Remaining: engine-specific baselines, a detection-timing target agreed in advance, evaluation on data with labelled faults |
 | Sequence models (LSTM/CNN/Transformer) | A deep-learning dependency (ADR), GPU-optional training, sequence windows in the shared feature path, longer training |
 | ~~Prediction intervals~~ — **IMPLEMENTED in M8** (§9, ADR-034); conformally calibrated in M10 (§9d, ADR-037) | Remaining: conditional (per-bucket or engine-aware) calibration; the 21–60 range is still under-covered |
 | Bias correction for the 21–60 range | Residual analysis on CV folds, asymmetric loss or post-hoc calibration, then re-selection |
@@ -221,3 +221,55 @@ Numbers in this section are read from [`reports/metrics_anomaly.json`](../report
 
 - **Does show:** on simulated run-to-failure data, distance from a population healthy reference increases as engines degrade, the out-of-fold threshold keeps the false-alarm rate on unseen healthy engines at the designed ~1 %, and the first sustained flag typically falls in the last third of life (IQR 64–87 % of life).
 - **Does not show:** detection of real faults or of anything other than FD001's single simulated degradation mode; calibrated alarm timing (no labels define when an alarm *should* fire); robustness to sensor faults, drift or other operating conditions. The trend target (median > 0.7) was not met, so the score should be read as a coarse health indicator alongside the RUL prediction, not as a validated anomaly detector.
+
+### 10d. Smoothed score — the FR-019 re-test (Milestone 11, ADR-038; rejected for serving, ADR-039)
+
+Source: the `smoothing` and `smoothed` sections of [`reports/metrics_anomaly.json`](../reports/metrics_anomaly.json) (run 2026-11-08T21:00:02Z, detector `anomaly-20261108-4734b37`). The detector is the M9 one: same scaler, covariance, features and raw threshold, and `model_anomaly.joblib` is byte-identical.
+
+**One pre-registered remedy.** Per engine, an exponentially weighted moving average of the raw distances, `ewm(halflife=10, adjust=True)` over full-window cycles in cycle order. The half-life was fixed before any number was computed and was not tuned. The smoothed threshold is the 99th percentile of the smoothed healthy-row scores from the same out-of-fold procedure: **5.0906** (raw 5.4036; smoothing lowers the upper tail, as expected). Pre-registered criterion (FR-021): smoothed train-OOF trend median > 0.7 **and** false-alarm rate ≤ 0.02.
+
+| # | Measure | Raw score (M9) | Smoothed, EWM half-life 10 (M11) |
+|---|---|---|---|
+| 1 | Trend: median per-engine Spearman(score, cycle), **train OOF** (IQR) | 0.680 (0.506–0.818) | 0.693 (0.394–0.857) |
+| 1 | Trend: share of train engines > 0.7 | 0.460 | 0.470 |
+| 1 | Trend: median, test engines (IQR) | 0.213 (-0.177–0.569) | 0.344 (-0.322–0.682) |
+| 1 | Trend: median, test engines with true RUL <=60 (n = 39) | 0.517 | 0.530 |
+| 1 | Trend: median, test engines with true RUL 61-125 (n = 49) | 0.040 | 0.298 |
+| 1 | Trend: median, test engines with true RUL >125 (n = 11) | -0.320 | -0.313 |
+| 2 | False-alarm rate on healthy OOF rows | 0.0101 | 0.0101 |
+| 3 | First sustained detection: fraction of life, median (IQR) | 0.758 (0.638–0.872) | 0.792 (0.716–0.866) |
+| 3 | True RUL at detection, median (IQR) | 49.0 (26.0–75.8) | 44.0 (27.2–62.5) |
+| 3 | Train engines never flagged | 0.020 | 0.160 |
+| 4 | Test engines flagged at last cycle, overall | 0.250 | 0.230 |
+| 4 | … true RUL 0-20 (n = 16) | 0.750 | 0.688 |
+| 4 | … true RUL 21-60 (n = 23) | 0.391 | 0.348 |
+| 4 | … true RUL 61-125 (n = 50) | 0.080 | 0.080 |
+| 4 | … true RUL >125 (n = 11) | 0.000 | 0.000 |
+| 5 | Spearman(normalised score, predicted RUL), test last cycle | -0.613 | -0.568 |
+
+**FR-021: trend 0.693 (NOT met), false-alarm 0.0101 (met) → NOT MET.** No other half-life was tried. The project title is unchanged (ADR-033 stands; ADR-036 stays unused).
+
+**Reading the side-by-side results.**
+
+- **The trend barely moves.** The median rises by 0.013 (0.680 → 0.693) and the share above 0.7 by one engine (0.46 → 0.47). The interquartile range widens downward (lower quartile 0.506 → 0.394), so smoothing helps engines with a clear late trend and hurts others. That fits 16 §10b: the shortfall comes mostly from the long flat early phase, which a moving average cannot turn into a trend.
+- **The false-alarm condition holds by construction.** The threshold is the 99th percentile of the same OOF healthy rows, so 0.0101 was expected before computing (ADR-038 said so); the trend was the binding condition.
+- **Smoothing costs detection.** The first sustained flag comes later (median 79 % of life instead of 76 %, 44 instead of 49 cycles left), and 16 % of training engines are never flagged at all, against 2 % for the raw score. This happens even though the smoothed threshold is lower. It is consistent with the EWM lagging behind the fast rise of the raw distance near failure; that explanation was not separately verified. On the test set, flags at the last cycle drop for true RUL ≤ 20 (0.750 → 0.688) and 21–60 (0.391 → 0.348).
+- **Test trends improve, mainly for truncated engines.** The test median rises from 0.213 to 0.344, almost all of it in the 61–125 group (0.040 → 0.298): a plausible reading (not separately verified) is that smoothing turns the weak, noisy trends of mid-life engines into more monotone ones. Engines near failure (≤ 60: 0.517 → 0.530) and still-healthy engines (> 125: −0.320 → −0.313) hardly change; the truncation effect of §10b remains.
+- **Agreement with the RUL model is slightly weaker** (−0.613 → −0.568).
+
+**History dependence (caveat, applies only if smoothing is enabled; not served since ADR-039).** The smoothed last-cycle score depends on how many cycles the client sends: EWM memory reaches back over the whole request. In training and evaluation every engine is smoothed over its full history from cycle 30. The API therefore expects the engine's full available history and reports `cycles_in_smoothing`; `raw_normalized_score` (last 30 records only) is returned alongside (06 §4a). A client that sends only the last 30 cycles gets a smoothed score equal to the raw distance divided by the lower smoothed threshold, i.e. a higher normalised score than the raw one. Example: the 30-cycle engine-1 request scores 0.7067, against 0.6657 raw.
+
+**Verdict and serving decision (M11 close-out, ADR-039, 2026-11-09).** FR-021 is not met, and smoothing makes detection worse. The served `is_anomalous` therefore stays on the **raw** score, as in M9. The anomaly metadata carries `smoothing_enabled: false`, and `/anomaly` returns `smoothed: false`. The implementation, smoothed threshold and this evaluation are kept as a documented negative result.
+
+| Detection trade-off | Raw score (served) | Smoothed (evaluated, not served) |
+|---|---|---|
+| Train engines never flagged (OOF) | 2% | 16% |
+| First sustained detection, median fraction of life | 0.758 | 0.792 |
+| True RUL at first detection, median (IQR) | 49 (26–76) | 44 (27–62) |
+| Test engines flagged at last cycle, true RUL 0–20 (n = 16) | 0.750 | 0.688 |
+| Test engines flagged at last cycle, true RUL 21–60 (n = 23) | 0.391 | 0.348 |
+| False-alarm rate, healthy OOF rows | 0.0101 | 0.0101 |
+| Train-OOF trend median (target > 0.7) | 0.680 | 0.693 |
+
+Same false-alarm rate, a marginally higher trend, but later and less complete detection: the remedy is rejected.
+

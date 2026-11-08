@@ -33,6 +33,7 @@ from predmaint.models.artifacts import SCHEMA_VERSION, save_artifacts
 from predmaint.models.predict import (
     ANOMALY_ARTIFACT,
     detector_scores,
+    ewm_smooth,
     load_model,
     predict_from_features,
 )
@@ -48,6 +49,17 @@ BUCKETS: tuple[tuple[str, float, float], ...] = (
     (">125", 125.5, np.inf),
 )
 RAW_RUL = "rul_raw"
+#: ADR-038 / FR-021: one half-life, fixed before any smoothed number was computed (not tuned).
+SMOOTHING: dict[str, Any] = {"method": "ewm", "halflife": 10, "adjust": True}
+FALSE_ALARM_LIMIT = 0.02  # FR-021 (b)
+#: ADR-039: FR-021 was not met and smoothing delays detection, so the API serves the raw score.
+#: The smoothed threshold and evaluation stay in the metadata as a documented negative result.
+SMOOTHING_ENABLED = False
+TRUNCATION_GROUPS: tuple[tuple[str, float, float], ...] = (
+    ("<=60", -np.inf, 60.5),
+    ("61-125", 60.5, 125.5),
+    (">125", 125.5, np.inf),
+)
 Echo = Callable[[str], None]
 
 
@@ -126,18 +138,23 @@ def _spearman_or_none(a: np.ndarray, b: np.ndarray) -> float | None:
     return float(spearmanr(a, b).statistic)
 
 
-def per_engine_trend(rows: pd.DataFrame, normalized: np.ndarray) -> dict[str, Any]:
-    """Per-engine Spearman(normalized score, cycle): median, IQR, share > 0.7."""
+def engine_trends(rows: pd.DataFrame, normalized: np.ndarray) -> pd.Series:
+    """Spearman(normalized score, cycle) per engine (NaN for < 3 points or a constant score)."""
     frame = pd.DataFrame(
         {"unit": rows["unit"].to_numpy(), "cycle": rows["cycle"].to_numpy(), "score": normalized}
     )
-    rhos = []
-    for _, g in frame.groupby("unit"):
+    rhos = {}
+    for unit, g in frame.groupby("unit"):
         if len(g) < 3 or g["score"].nunique() < 2:
-            rhos.append(np.nan)
+            rhos[unit] = np.nan
             continue
-        rhos.append(float(spearmanr(g["cycle"], g["score"]).statistic))
-    rhos_arr = np.asarray(rhos, dtype=float)
+        rhos[unit] = float(spearmanr(g["cycle"], g["score"]).statistic)
+    return pd.Series(rhos, dtype=float)
+
+
+def per_engine_trend(rows: pd.DataFrame, normalized: np.ndarray) -> dict[str, Any]:
+    """Per-engine Spearman(normalized score, cycle): median, IQR, share > 0.7."""
+    rhos_arr = engine_trends(rows, normalized).to_numpy()
     valid = rhos_arr[np.isfinite(rhos_arr)]
     return {
         "n_engines": int(len(rhos_arr)),
@@ -169,6 +186,50 @@ def detection_timing(rows: pd.DataFrame, normalized: np.ndarray) -> dict[str, An
         "fraction_of_life": _quantiles(np.asarray(fractions)),
         "true_rul_at_detection": _quantiles(np.asarray(ruls)),
     }
+
+
+def trend_by_true_rul(
+    rows: pd.DataFrame, normalized: np.ndarray, truth_by_unit: pd.Series
+) -> list[dict[str, Any]]:
+    """Test-engine trend grouped by true RUL at cutoff (the truncation effect, 16 §10)."""
+    rhos = engine_trends(rows, normalized)
+    truth = truth_by_unit.reindex(rhos.index).to_numpy(dtype=float)
+    out = []
+    for label, lo, hi in TRUNCATION_GROUPS:
+        values = rhos.to_numpy()[(truth > lo) & (truth <= hi)]
+        values = values[np.isfinite(values)]
+        out.append(
+            {
+                "true_rul_group": label,
+                "n_engines_scored": int(values.size),
+                "median": float(np.median(values)) if values.size else None,
+            }
+        )
+    return out
+
+
+def smooth_per_engine(rows: pd.DataFrame, scores: np.ndarray, halflife: float) -> np.ndarray:
+    """EWM of raw scores within each engine, in cycle order; returned in ``rows`` order."""
+    frame = pd.DataFrame(
+        {
+            "unit": rows["unit"].to_numpy(),
+            "cycle": rows["cycle"].to_numpy(),
+            "score": np.asarray(scores, dtype=float),
+        }
+    ).reset_index(drop=True)
+    out = np.empty(len(frame))
+    for _, g in frame.groupby("unit"):
+        ordered = g.sort_values("cycle")
+        out[ordered.index.to_numpy()] = ewm_smooth(ordered["score"].to_numpy(), halflife)
+    return out
+
+
+def last_cycle_values(rows: pd.DataFrame, values: np.ndarray) -> np.ndarray:
+    """Value at each engine's last cycle, engines in ascending unit order."""
+    frame = pd.DataFrame(
+        {"unit": rows["unit"].to_numpy(), "cycle": rows["cycle"].to_numpy(), "v": values}
+    )
+    return frame.sort_values(["unit", "cycle"]).groupby("unit")["v"].last().to_numpy()
 
 
 def flagged_by_bucket(truth: np.ndarray, normalized_last: np.ndarray) -> list[dict[str, Any]]:
@@ -288,6 +349,59 @@ def run_anomaly_training(
     truth = data.rul[RUL_COLUMN].to_numpy(dtype=float)
     point_pred = predict_from_features(point.pipeline, last, rul_cap)
     rho_rul = _spearman_or_none(last_norm, point_pred)
+    truth_by_unit = pd.Series(truth, index=np.arange(1, len(truth) + 1))
+    test_raw = detector_scores(detector, test_rows)
+    if not np.allclose(last_cycle_values(test_rows, test_raw) / threshold, last_norm):
+        raise RuntimeError("last-cycle scores are misaligned with the RUL file")  # invariant
+
+    # --- ADR-038: smoothed score, same OOF scores, one pre-registered half-life ------------
+    halflife = float(SMOOTHING["halflife"])
+    oof_smoothed = smooth_per_engine(rows, chosen["raw"], halflife)
+    s_threshold = float(np.quantile(oof_smoothed[healthy], THRESHOLD_QUANTILE))
+    s_norm = oof_smoothed / s_threshold
+    s_trend = per_engine_trend(rows, s_norm)
+    s_false_alarm = float(np.mean(s_norm[healthy] > 1.0))
+    test_s_norm = smooth_per_engine(test_rows, test_raw, halflife) / s_threshold
+    last_s_norm = last_cycle_values(test_rows, test_s_norm)
+    trend_met = bool((s_trend["median"] or -1) > TREND_ACCEPTANCE)
+    false_alarm_met = bool(s_false_alarm <= FALSE_ALARM_LIMIT)
+    smoothed = {
+        "threshold": s_threshold,
+        "threshold_check": {
+            "oof_threshold": s_threshold,
+            "raw_oof_threshold": threshold,
+            "smoothed_below_raw": bool(s_threshold < threshold),
+        },
+        "evaluation": {
+            "train_oof": {
+                "trend": s_trend,
+                "false_alarm_rate_healthy": s_false_alarm,
+                "n_healthy_rows": int(healthy.sum()),
+                "detection": detection_timing(rows, s_norm),
+            },
+            "test": {
+                "trend": per_engine_trend(test_rows, test_s_norm),
+                "trend_by_true_rul": trend_by_true_rul(test_rows, test_s_norm, truth_by_unit),
+                "flagged_at_last_cycle": {
+                    "overall": float(np.mean(last_s_norm > 1.0)),
+                    "buckets": flagged_by_bucket(truth, last_s_norm),
+                },
+                "spearman_with_rul_prediction": _spearman_or_none(last_s_norm, point_pred),
+            },
+            "acceptance": {
+                "criterion": (
+                    f"median per-engine Spearman(smoothed score, cycle) on train OOF > "
+                    f"{TREND_ACCEPTANCE} AND false-alarm rate on healthy OOF rows <= "
+                    f"{FALSE_ALARM_LIMIT}"
+                ),
+                "trend_value": s_trend["median"],
+                "trend_met": trend_met,
+                "false_alarm_value": s_false_alarm,
+                "false_alarm_met": false_alarm_met,
+                "met": trend_met and false_alarm_met,
+            },
+        },
+    }
 
     evaluation = {
         "train_oof": {
@@ -303,6 +417,7 @@ def run_anomaly_training(
                 "buckets": flagged_by_bucket(truth, last_norm),
             },
             "spearman_with_rul_prediction": rho_rul,
+            "trend_by_true_rul": trend_by_true_rul(test_rows, test_raw / threshold, truth_by_unit),
         },
         "acceptance": {
             "criterion": (
@@ -324,6 +439,7 @@ def run_anomaly_training(
         },
     }
     _echo_report(echo, evaluation, method, threshold, oof_seconds)
+    _echo_side_by_side(echo, evaluation, smoothed)
 
     trained_at = datetime.now(UTC).replace(microsecond=0)
     sha = _git("rev-parse", "HEAD") or "unknown"
@@ -355,6 +471,9 @@ def run_anomaly_training(
         "data": {"subset": meta["data"]["subset"], **shas},
         "config": dict(config),
         "evaluation": evaluation,
+        "smoothing": dict(SMOOTHING),
+        "smoothing_enabled": SMOOTHING_ENABLED,
+        "smoothed": smoothed,
         "timings_seconds": {"oof_evaluation": round(oof_seconds, 2)},
     }
     model_path, metadata_path = save_artifacts(detector, metadata, model_dir, ANOMALY_ARTIFACT)
@@ -419,3 +538,88 @@ def _echo_report(
         f"{'MET' if acc['met'] else 'NOT MET'}"
     )
     echo(f"Timing: OOF evaluation {seconds:.2f} s")
+
+
+def _echo_side_by_side(echo: Echo, raw: dict[str, Any], smoothed: dict[str, Any]) -> None:
+    """Raw (M9) vs smoothed (ADR-038) evaluation, one line per metric."""
+    sm = smoothed["evaluation"]
+    pairs = [(raw, "raw"), (sm, "smoothed")]
+
+    def num(value: float | None, digits: int = 3) -> str:
+        return "n/a" if value is None else f"{value:.{digits}f}"
+
+    echo(
+        f"Side by side (smoothing: ewm halflife={SMOOTHING['halflife']}, adjust=True). "
+        f"Thresholds (OOF q0.99): raw {smoothed['threshold_check']['raw_oof_threshold']:.4f} | "
+        f"smoothed {smoothed['threshold']:.4f}"
+    )
+    echo(f"  {'metric':<52} {'raw':>22} {'smoothed':>22}")
+
+    def line(label: str, values: list[str]) -> None:
+        echo(f"  {label:<52} {values[0]:>22} {values[1]:>22}")
+
+    line(
+        "[1] train OOF trend median (IQR)",
+        [
+            f"{num(e['train_oof']['trend']['median'])} "
+            f"({num(e['train_oof']['trend']['p25'])}–{num(e['train_oof']['trend']['p75'])})"
+            for e, _ in pairs
+        ],
+    )
+    line(
+        "[1] train OOF share > 0.7",
+        [num(e["train_oof"]["trend"]["share_above_0_7"]) for e, _ in pairs],
+    )
+    line("[1] test trend median", [num(e["test"]["trend"]["median"]) for e, _ in pairs])
+    for i, group in enumerate(TRUNCATION_GROUPS):
+        line(
+            f"[1] test trend median, true RUL {group[0]} (n)",
+            [
+                f"{num(e['test']['trend_by_true_rul'][i]['median'])} "
+                f"(n={e['test']['trend_by_true_rul'][i]['n_engines_scored']})"
+                for e, _ in pairs
+            ],
+        )
+    line(
+        "[2] false-alarm rate, healthy OOF rows",
+        [num(e["train_oof"]["false_alarm_rate_healthy"], 4) for e, _ in pairs],
+    )
+    line(
+        "[3] detection: fraction of life, median",
+        [num(e["train_oof"]["detection"]["fraction_of_life"]["median"]) for e, _ in pairs],
+    )
+    line(
+        "[3] detection: true RUL, median (IQR)",
+        [
+            f"{num(d['median'], 1)} ({num(d['p25'], 1)}–{num(d['p75'], 1)})"
+            for d in (e["train_oof"]["detection"]["true_rul_at_detection"] for e, _ in pairs)
+        ],
+    )
+    line(
+        "[3] never flagged",
+        [num(e["train_oof"]["detection"]["never_flagged_fraction"]) for e, _ in pairs],
+    )
+    line(
+        "[4] test flagged at last cycle, overall",
+        [num(e["test"]["flagged_at_last_cycle"]["overall"]) for e, _ in pairs],
+    )
+    for i, (label, _lo, _hi) in enumerate(BUCKETS):
+        line(
+            f"[4] test flagged, true RUL {label} (n)",
+            [
+                f"{num(e['test']['flagged_at_last_cycle']['buckets'][i]['flagged_fraction'])} "
+                f"(n={e['test']['flagged_at_last_cycle']['buckets'][i]['n']})"
+                for e, _ in pairs
+            ],
+        )
+    line(
+        "[5] Spearman with RUL prediction (test last cycle)",
+        [num(e["test"]["spearman_with_rul_prediction"]) for e, _ in pairs],
+    )
+    acc = sm["acceptance"]
+    echo(
+        f"FR-021 ({acc['criterion']}): trend {num(acc['trend_value'])} "
+        f"({'met' if acc['trend_met'] else 'NOT met'}), false-alarm "
+        f"{num(acc['false_alarm_value'], 4)} ({'met' if acc['false_alarm_met'] else 'NOT met'})"
+        f" → {'MET' if acc['met'] else 'NOT MET'}"
+    )

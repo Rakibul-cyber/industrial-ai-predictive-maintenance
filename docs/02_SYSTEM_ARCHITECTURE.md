@@ -30,7 +30,7 @@ flowchart LR
     SEL --> ART[(models/model.joblib<br/>models/model_metadata.json)]
     ART --> IV[models.intervals<br/>q0.1 / q0.9 HGB, M8]
     IV --> IART[(models/model_intervals.*)]
-    ART --> AN[models.anomaly<br/>healthy ref RUL ≥ 125,<br/>Mahalanobis + OOF q0.99, M9]
+    ART --> AN[models.anomaly<br/>healthy ref RUL ≥ 125,<br/>Mahalanobis + OOF q0.99, M9<br/>+ EWM half-life 10, M11]
     AN --> AART[(models/model_anomaly.*)]
   end
   subgraph Runtime["Runtime (docker compose, one image)"]
@@ -68,7 +68,7 @@ flowchart LR
 4. Pipeline predict → clamp to [0, RUL_CAP] (ADR-027) → health status (ADR-025) → out-of-range warnings → if a matching interval artifact is loaded, q0.1/q0.9 predictions on the same feature row, clamped and ordered around the point (ADR-034); otherwise null bounds.
 5. Response with `model_version` from metadata.
 
-**`POST /anomaly` (M9, ADR-035):** same request schema and the same validation function as `/predict` (identical 422 errors). Features are built over the whole request (`features.build`), the detector scores every full-window row, and the response carries the last row's raw and normalised score (`score / threshold`), `is_anomalous` (normalised > 1) and, with `?include_series=true`, the normalised score for each full-window cycle. The last-cycle score depends only on the last `window_size` records, as for `/predict`. Without a loaded, matching detector → 503 `ANOMALY_UNAVAILABLE`; `/predict` is unaffected.
+**`POST /anomaly` (M9, ADR-035):** same request schema and the same validation function as `/predict` (identical 422 errors). Features are built over the whole request (`features.build`), the detector scores every full-window row, and the response carries the last row's raw and normalised score (`score / threshold`), `is_anomalous` (normalised > 1) and, with `?include_series=true`, the normalised score for each full-window cycle. The last-cycle score depends only on the last `window_size` records, as for `/predict`. Without a loaded, matching detector → 503 `ANOMALY_UNAVAILABLE`; `/predict` is unaffected. M11 added an optional EWM smoothing of the per-cycle distances (ADR-038). It did not meet FR-021, so it is **disabled for serving** (ADR-039, `smoothing_enabled: false`): responses carry `smoothed: false` and the raw score, which depends only on the last 30 records.
 
 The exact contract is in [06](06_API_SPECIFICATION.md); the function-level contract in [05](05_ML_DESIGN.md) §10.
 
@@ -80,7 +80,7 @@ Confirmed in M5 (the API server log shows the dashboard's real calls; 14 §M5):
 - Every script run calls `GET /health` (status bar) and, if a model is loaded, `GET /model/info` (kept sensors for the chart, health bands, model-info table).
 - **Engine explorer:** the selected engine's first N cycles (raw FD001 under `DATA_DIR`, read with `predmaint.data.load`) become a docs/06 request body; `POST /predict` returns the predicted RUL and status shown in the UI. True RUL is computed locally from the dataset (`helpers.true_rul`).
 - **RUL trajectory:** `POST /predict` every 5 cycles (`TRAJECTORY_STEP`) from cycle 30 to the engine's last cycle, cached with `st.cache_data` keyed by (dataset, unit, step, model_version). A failed call raises, so partial results are never cached.
-- **Anomaly (M9), only when `/health.anomaly_loaded` is true:** the explorer makes one `POST /anomaly` call per prediction and shows the normalised score with a NORMAL/ANOMALOUS badge. The trajectory view makes **one** `POST /anomaly?include_series=true` call on the engine's full history (cached like the trajectory) and charts the normalised score with the threshold at 1.0. Missing or failed anomaly responses hide these elements; the RUL views are unchanged.
+- **Anomaly (M9), only when `/health.anomaly_loaded` is true:** the explorer makes one `POST /anomaly` call per prediction and shows the normalised score with a NORMAL/ANOMALOUS badge. The trajectory view makes **one** `POST /anomaly?include_series=true` call on the engine's full history (cached like the trajectory) and charts the normalised score with the threshold at 1.0. Missing or failed anomaly responses hide these elements; the RUL views are unchanged. Since the M11 close-out (ADR-039) the badge and chart use the served raw score; the chart caption says smoothing is evaluated but not served, and the model-info anomaly table shows raw (served) and smoothed (evaluated, not served) evaluations side by side.
 - **Upload:** a docs/06 JSON body from the user is posted as-is; the response or error envelope is shown verbatim. This works without the raw dataset.
 - Import boundary: dashboard modules may import only `predmaint.config`, `predmaint.data.load` and `predmaint.dashboard.*` — enforced by `tests/test_dashboard_client.py`.
 

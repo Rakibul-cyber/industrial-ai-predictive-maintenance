@@ -168,3 +168,17 @@ Append to the "Change records" section below **before** implementing, and get us
 | Affected docs | 00, 01, 05, 06, 08, 09, 11, 12, 13, 14, 15, 16, 17, README, CLAUDE.md. |
 | Regression tests | Q hand example; widen-only/ordering/clamp invariants; v1.1 fallback without Q; synthetic coverage near 1 − α; API fields; real-data reproduction of the calibration numbers; sidecar. Full suite with the 85 % gate. |
 | Approval | Authorized by the user on 2026-11-08 (M10 authorization). |
+
+### CR-012 — Smoothed anomaly score, one pre-specified remedy for FR-019 (Milestone 11) (2026-11-08)
+
+| Field | Content |
+|---|---|
+| Reason | Approved scope extension (§1.4), authorized by the user on 2026-11-08. FR-019 (median per-engine Spearman(score, cycle) on train OOF > 0.7) was NOT MET in M9 (0.680). |
+| Evidence | `reports/metrics_anomaly.json` (M9): `evaluation.acceptance.value` = 0.6798250694250569, `met: false`. 16 §10b (M9 wording): "A whole-life Spearman is diluted by the long flat early phase, where the score is noise around the healthy level." The M11 authorization attributes part of the shortfall to cycle-to-cycle noise of the raw score and tests exactly one remedy. |
+| Impact | Anomaly metadata and report gain a smoothing config, a smoothed threshold and a smoothed evaluation side by side with the raw one. The detector (scaler, Ledoit-Wolf covariance, features) is not changed. Inference smooths in one place. API additive (`raw_normalized_score`, `smoothed`, `cycles_in_smoothing`; series entries gain `raw_normalized_score`; `/model/info.anomaly` gains the smoothing config and both evaluations), `api_version` 0.5.0. `/anomaly` becomes history-dependent (documented in 06). Dashboard anomaly chart shows both series. Point and interval models untouched. |
+| Smallest fix | Exponentially weighted moving average with **one** fixed half-life (10 cycles), threshold re-derived out-of-fold (ADR-038). No other half-life, no refit of the detector. |
+| Affected docs | 00, 01, 02, 05, 06, 08, 09, 11, 12, 13, 14, 15, 16, 17, README, CLAUDE.md (+ title docs if FR-021 is met, ADR-036). |
+| Regression tests | EWM hand example; synthetic drift (variance, crossing, detection lag); OOF smoothed threshold below raw; history dependence (raw equal, smoothed may differ); API, dashboard; real-data reproduction, sidecars, detector parameters identical to M9. |
+| Approval | Authorized by the user on 2026-11-08 (M11 authorization). |
+
+**CR-012 outcome (2026-11-09, M11 close-out):** FR-021 **not met** (smoothed trend median 0.693 ≤ 0.7; false-alarm 0.0101 met). Smoothing also degraded detection (never flagged 2 % → 16 %, median detection RUL 49 → 44). Decision ADR-039: serve the raw score (`smoothing_enabled: false` in the anomaly metadata); smoothing implementation, smoothed threshold and evaluation retained as a disabled, documented experiment. CI checkout fetches full history (`fetch-depth: 0`) so the M9-artifact comparison test runs there. Title unchanged (ADR-033 stands).

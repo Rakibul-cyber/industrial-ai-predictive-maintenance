@@ -231,6 +231,28 @@ class AnomalyModel:
     def model_version(self) -> str:
         return str(self.metadata["model_version"])
 
+    @property
+    def smoothing(self) -> dict[str, Any] | None:
+        """EWM config (ADR-038), or ``None`` for M9 metadata (raw score only)."""
+        config = self.metadata.get("smoothing")
+        return None if config is None else dict(config)
+
+    @property
+    def smoothed_threshold(self) -> float | None:
+        smoothed = self.metadata.get("smoothed")
+        return None if smoothed is None else float(smoothed["threshold"])
+
+    @property
+    def smoothing_enabled(self) -> bool:
+        """Whether the API serves the smoothed score (ADR-039: ``smoothing_enabled: false``).
+
+        Metadata with a ``smoothing`` config but no flag (M11 before ADR-039) is treated as
+        enabled; metadata without ``smoothing`` (M9) is raw only.
+        """
+        if self.smoothing is None:
+            return False
+        return bool(self.metadata.get("smoothing_enabled", True))
+
 
 @dataclass(frozen=True)
 class AnomalyResult:
@@ -244,6 +266,18 @@ class AnomalyResult:
     model_version: str
     cycles_received: int
     series: list[dict[str, float]] | None = None
+    raw_normalized_score: float | None = None
+    smoothed: bool = False
+    cycles_in_smoothing: int | None = None
+
+
+def ewm_smooth(values: np.ndarray, halflife: float) -> np.ndarray:
+    """Exponentially weighted mean in order (``pandas`` ``ewm(halflife, adjust=True)``).
+
+    The single smoothing implementation (ADR-038), used by training, evaluation and the API.
+    """
+    series = pd.Series(np.asarray(values, dtype=float))
+    return series.ewm(halflife=halflife, adjust=True).mean().to_numpy()
 
 
 def detector_scores(detector: Mapping[str, Any], features: pd.DataFrame) -> np.ndarray:
@@ -267,6 +301,13 @@ def anomaly_mismatch(anomaly: AnomalyModel, model: "LoadedModel") -> str | None:
     missing = [f for f in anomaly.features if f not in model.metadata["feature_names"]]
     if missing:
         return f"anomaly features not produced by the served model's pipeline: {missing}"
+    smoothing = anomaly.smoothing
+    if smoothing is not None and (
+        smoothing.get("method") != "ewm"
+        or smoothing.get("adjust") is not True
+        or anomaly.smoothed_threshold is None
+    ):
+        return f"unsupported anomaly smoothing config: {smoothing}"
     return None
 
 
@@ -471,8 +512,11 @@ def score_anomaly(
 ) -> AnomalyResult:
     """Anomaly score (ADR-035) at the last cycle, with the same input contract as ``predict_rul``.
 
-    With ``include_series`` the normalised score is returned for every cycle that has a full
-    trailing window (``cycles_received - window_size + 1`` entries).
+    With smoothing configured (ADR-038) the score is the EWM of the raw distances over every
+    full-window cycle sent, so the last-cycle score depends on how much history is sent;
+    ``raw_normalized_score`` is the unsmoothed value. With ``include_series`` both normalised
+    scores are returned for every cycle with a full trailing window
+    (``cycles_received - window_size + 1`` entries).
 
     Raises:
         AnomalyNotAvailableError: if ``anomaly`` does not belong to ``model``.
@@ -485,22 +529,32 @@ def score_anomaly(
     validated = _validated_frame(frame.reset_index(drop=True), model)
     features = build_features(validated, model.required_sensors, model.window_size)
     raw = detector_scores(anomaly.detector, features)
-    normalized = raw / anomaly.threshold
     if not np.isfinite(raw).all():
         raise InvalidValuesError("anomaly detector produced a non-finite score")
+    raw_normalized = raw / anomaly.threshold
+    smoothing = anomaly.smoothing if anomaly.smoothing_enabled else None
+    if smoothing is None:  # raw score served (M9 metadata, or smoothing disabled by ADR-039)
+        score, threshold = raw, anomaly.threshold
+    else:  # ADR-038: EWM over every full-window cycle sent, then the smoothed threshold
+        score = ewm_smooth(raw, float(smoothing["halflife"]))
+        threshold = float(anomaly.smoothed_threshold)  # type: ignore[arg-type]
+    normalized = score / threshold
     series = None
     if include_series:
         series = [
-            {"cycle": int(c), "normalized_score": float(v)}
-            for c, v in zip(features["cycle"], normalized, strict=True)
+            {"cycle": int(c), "normalized_score": float(v), "raw_normalized_score": float(r)}
+            for c, v, r in zip(features["cycle"], normalized, raw_normalized, strict=True)
         ]
     return AnomalyResult(
         last_cycle=int(features["cycle"].iloc[-1]),
-        anomaly_score=float(raw[-1]),
+        anomaly_score=float(score[-1]),
         normalized_score=float(normalized[-1]),
-        threshold=anomaly.threshold,
+        threshold=threshold,
         is_anomalous=bool(normalized[-1] > 1.0),
         model_version=anomaly.model_version,
         cycles_received=len(frame),
         series=series,
+        raw_normalized_score=float(raw_normalized[-1]),
+        smoothed=smoothing is not None,
+        cycles_in_smoothing=None if smoothing is None else len(raw),
     )

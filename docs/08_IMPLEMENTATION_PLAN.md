@@ -318,6 +318,36 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** FR-020 measured and stated (met or not met); point and quantile artifacts byte-identical; all tests pass with the 85 % gate; smoke test asserts `interval_calibrated: true`.
 - **Estimated effort:** 3 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting review). FR-020 **met, narrowly** (0.777 within 0.77–0.83). Evidence in 14.
 
+## M11 — Smoothed anomaly score, FR-019 re-test (post-MVP extension, CR-012 / ADR-038)
+
+- **Objective:** test one pre-specified remedy (EWM, half-life 10) for the M9 trend shortfall, side by side with the raw score; plus housekeeping (dashboard model-info table shows the calibrated M10 interval figures).
+- **Dependencies:** M10 (committed `4734b37`, CI run 42522391649 green).
+- **Requirements:** FR-021.
+- **Files to create:** none.
+- **Files to modify:** `src/predmaint/__init__.py` (0.5.0), `models/anomaly.py`, `models/predict.py`, `api/{schemas,service}.py`, `dashboard/{helpers,app}.py`, `models/model_anomaly_metadata.json`, `reports/metrics_anomaly.json`, `examples/expected_predictions.json`, `scripts/smoke_test.sh`, tests, README, CLAUDE.md, docs.
+- **Tasks:**
+  - [x] M11-T0 Housekeeping (no ADR): dashboard model-info interval table shows the calibrated M10 figures (held-out engines after Q, Q, test after) with the uncalibrated row for comparison (`helpers.interval_coverage_table`).
+  - [x] M11-T1 Change control first: CR-012, ADR-038, FR-021 (criterion pre-registered before any smoothed number), doc 00 scope, this plan.
+  - [x] M11-T2 `predict.ewm_smooth` (single implementation); `anomaly.py`: `smooth_per_engine`, `engine_trends`, `trend_by_true_rul`, `last_cycle_values`, smoothed OOF threshold and side-by-side evaluation; metadata/report gain `smoothing` and `smoothed`.
+  - [x] M11-T3 Inference: `score_anomaly` smooths when the metadata has `smoothing`; returns `raw_normalized_score`, `smoothed`, `cycles_in_smoothing`; M9 metadata → raw behaviour.
+  - [x] M11-T4 API 0.5.0: new `/anomaly` and series fields; `/model/info.anomaly` gains the smoothing config and both evaluations.
+  - [x] M11-T5 Dashboard: smoothed (bold) + raw (faint) anomaly chart, explorer caption, raw/smoothed model-info table.
+  - [x] M11-T6 Training run; sidecar regenerated (anomaly block only); smoke test asserts `smoothed` and engine 34 anomalous.
+  - [x] M11-T7 Tests (EWM hand values, synthetic drift, OOF threshold direction, history dependence, M9 fallback, API, dashboard, real data incl. detector parameters vs the M9 artifact).
+- **Verification commands:**
+
+  ```bash
+  ruff check . && ruff format --check .
+  pytest -q
+  shasum -a 256 models/model.joblib models/model_intervals.joblib models/model_anomaly.joblib   # before and after
+  python scripts/train.py --model anomaly
+  API_PORT=8001 python -m predmaint.api.main &   # curl /anomaly (engine 1, 34), ?include_series=true
+  bash scripts/smoke_test.sh; echo $?
+  ```
+
+- **Acceptance criteria:** FR-021 measured and stated (met or not met); detector parameters identical to M9; point and interval artifacts byte-identical; all tests pass with the 85 % gate; smoke test asserts `smoothed: true` and engine 34 anomalous.
+- **Estimated effort:** 3 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting review). FR-021 **NOT MET** (smoothed trend 0.693 ≤ 0.7); title unchanged. Evidence in 14.
+
 ## Requirement → milestone traceability
 
 | Milestone | Requirements |
@@ -332,3 +362,4 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 | M8 | FR-018 |
 | M9 | FR-019 |
 | M10 | FR-020 |
+| M11 | FR-021 |

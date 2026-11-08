@@ -2,7 +2,7 @@
 
 FastAPI app built by `predmaint.api.main:create_app()` (module-level `app` for uvicorn). Run it with `python -m predmaint.api.main`, which binds `$API_HOST:$API_PORT` (default `127.0.0.1:8000`), or with `uvicorn predmaint.api.main:app --host … --port …`. The served model is loaded once at startup from `$MODEL_PATH` (default `$MODEL_DIR/model.joblib`; env vars in [10](10_DEPLOYMENT_PLAN.md) §3). JSON only. No authentication, CORS or rate limiting (local MVP; ADR-012). Interactive docs at `/docs` (title, version from the package, description, and a real example request when the server runs from the repo root).
 
-All bodies below were copied from `curl` / TestClient output against the served model `primary-20261108-f4c86df` on 2026-11-08 (Milestone 4; interval fields from Milestone 8; `/anomaly`, `anomaly_loaded`, `/model/info.anomaly` from Milestone 9; calibrated bounds, `interval_calibrated`, `/model/info.intervals` calibration fields and `api_version` 0.4.0 from Milestone 10).
+All bodies below were copied from `curl` / TestClient output against the served model `primary-20261108-f4c86df` on 2026-11-08 (Milestone 4; interval fields from Milestone 8; `/anomaly`, `anomaly_loaded`, `/model/info.anomaly` from Milestone 9; calibrated bounds, `interval_calibrated`, `/model/info.intervals` calibration fields from Milestone 10; smoothed anomaly fields (inactive since the M11 close-out, ADR-039) and `api_version` 0.5.0 from Milestone 11).
 
 ## 1. Endpoints
 
@@ -24,13 +24,13 @@ All bodies below were copied from `curl` / TestClient output against the served 
 With a model (200):
 
 ```json
-{"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.4.0","intervals_loaded":true,"anomaly_loaded":true}
+{"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.5.0","intervals_loaded":true,"anomaly_loaded":true}
 ```
 
 Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 
 ```json
-{"status":"degraded","model_loaded":false,"model_version":null,"api_version":"0.4.0","intervals_loaded":false,"anomaly_loaded":false}
+{"status":"degraded","model_loaded":false,"model_version":null,"api_version":"0.5.0","intervals_loaded":false,"anomaly_loaded":false}
 ```
 
 | Field | Type | Rule |
@@ -38,7 +38,7 @@ Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 | `status` | `"ok" \| "degraded"` | `degraded` when no model is loaded. |
 | `model_loaded` | bool | Whether `/predict` can serve. Readiness probes (M6 compose healthcheck) must check this field, not only the status code. |
 | `model_version` | string \| null | Served model version; `null` without a model. |
-| `api_version` | string | `predmaint.__version__` (0.2.0 since M8, 0.3.0 since M9, 0.4.0 since M10). |
+| `api_version` | string | `predmaint.__version__` (0.2.0 since M8, 0.3.0 since M9, 0.4.0 since M10, 0.5.0 since M11). |
 | `intervals_loaded` | bool | Whether a prediction-interval artifact matching the served model is loaded (ADR-034). |
 | `anomaly_loaded` | bool | Whether an anomaly detector matching the served model is loaded (ADR-035). Not part of the readiness check. |
 
@@ -143,8 +143,10 @@ The same call with `examples/predict_request.json` (31 records) returns the iden
      "test_after": {"n": 100, "coverage_unclipped": 0.75, "coverage_clipped": 0.85, "mean_width": 44.74103261775972, "median_width": 43.69900693422867, "n_reordered": 6},
      "acceptance_criterion": "evaluation-half coverage (capped target) within 0.80 ± 0.03", "acceptance_met": true,
      "caveat": "Split-conformal coverage assumes exchangeable rows; rows of one engine are correlated, so the guarantee is approximate: the effective sample size is closer to the number of engines than to the number of rows."}},
- "anomaly": {"model_version": "anomaly-20261108-a25df0e", "for_model_version": "primary-20261108-f4c86df", "method": "mahalanobis_ledoitwolf", "threshold": 5.40363364967852, "threshold_quantile": 0.99, "healthy_rows": 5329, "trained_at": "2026-11-08T19:33:06Z",
-   "trend_median_train_oof": 0.6798250694250569, "false_alarm_rate_healthy": 0.010133233252017265, "detection_fraction_of_life_median": 0.7581860706860707, "detection_true_rul_median": 49.0, "never_flagged_fraction": 0.02, "acceptance_met": false}
+ "anomaly": {"model_version": "anomaly-20261108-4734b37", "for_model_version": "primary-20261108-f4c86df", "method": "mahalanobis_ledoitwolf", "threshold": 5.40363364967852, "threshold_quantile": 0.99, "healthy_rows": 5329, "trained_at": "2026-11-08T21:00:02Z",
+   "trend_median_train_oof": 0.6798250694250569, "false_alarm_rate_healthy": 0.010133233252017265, "detection_fraction_of_life_median": 0.7581860706860707, "detection_true_rul_median": 49.0, "never_flagged_fraction": 0.02, "acceptance_met": false,
+   "smoothing": {"method": "ewm", "halflife": 10, "adjust": true}, "smoothing_enabled": false, "smoothed_threshold": 5.090594528745487, "smoothed_acceptance_met": false,
+   "evaluation_raw": {…}, "evaluation_smoothed": {…}}
 }
 ```
 
@@ -154,38 +156,45 @@ All fields come from `model_metadata.json` (05 §9), except `n_features` (= `len
 
 ### 4.3 Required fields (FR-012)
 
-`model_name, model_version, trained_at, git_sha, selected_by, data_subset, train_sha256, window_size, rul_cap, n_features, required_sensors, feature_names, health_bands, metrics, sklearn_version_match`, plus `intervals` (object or `null`, ADR-034; `cv_oof`/`test` are the uncalibrated v1.1 numbers, and since M10 `calibrated`, `conformal_q`, `alpha` and `calibration` (before/after coverage, FR-020 verdict, exchangeability caveat; `null` for uncalibrated metadata) are added per ADR-037) and `anomaly` (object or `null`, ADR-035; fields from `model_anomaly_metadata.json`: version, method, OOF threshold, healthy-row count and the headline train-OOF evaluation incl. `acceptance_met`).
+`model_name, model_version, trained_at, git_sha, selected_by, data_subset, train_sha256, window_size, rul_cap, n_features, required_sensors, feature_names, health_bands, metrics, sklearn_version_match`, plus `intervals` (object or `null`, ADR-034; `cv_oof`/`test` are the uncalibrated v1.1 numbers, and since M10 `calibrated`, `conformal_q`, `alpha` and `calibration` (before/after coverage, FR-020 verdict, exchangeability caveat; `null` for uncalibrated metadata) are added per ADR-037) and `anomaly` (object or `null`, ADR-035; fields from `model_anomaly_metadata.json`: version, method, OOF threshold, healthy-row count and the headline **raw** train-OOF evaluation incl. `acceptance_met` (FR-019); since M11 also `smoothing`, `smoothing_enabled` (`false` since ADR-039), `smoothed_threshold`, `smoothed_acceptance_met` (FR-021) and the full `evaluation_raw` / `evaluation_smoothed` objects, identical to the `evaluation` and `smoothed.evaluation` sections of `reports/metrics_anomaly.json`, abbreviated `{…}` above).
 
-## 4a. `POST /anomaly` (M9, ADR-035)
+## 4a. `POST /anomaly` (M9, ADR-035; smoothing evaluated in M11, not served, ADR-038/039)
 
 **Request:** identical to `POST /predict` (§3.1–3.3): same Pydantic schema and the same business validation function, so every 422 body is identical to `/predict`'s for the same input (tested). Query parameter `include_series` (bool, default `false`; an unparseable value → 422 `VALIDATION_ERROR`).
 
-**Response 200** — real bodies from the M9 local API (`examples/predict_request.json`, test engine 1; `examples/predict_request_late.json`, test engine 34):
+**Served behaviour since the M11 close-out (ADR-039): the raw score.** The pre-registered smoothing remedy (ADR-038, EWM half-life 10) did not meet FR-021 and delayed detection, so the anomaly metadata sets `smoothing_enabled: false`. `/anomaly` serves the **raw** M9 score: `smoothed: false`, `cycles_in_smoothing: null`, `normalized_score == raw_normalized_score`, raw threshold 5.4036. The raw last-cycle score depends only on the last 30 records, as in M9. The smoothing fields are present but inactive. The smoothing config, smoothed threshold (5.0906) and smoothed evaluation stay in the metadata and in `/model/info.anomaly` (`smoothing_enabled: false`) as a documented negative result (16 §10d).
+
+**Response 200** — real bodies from the M11 close-out local API (`examples/predict_request.json`, test engine 1; `examples/predict_request_late.json`, test engine 34). The values equal M9's; only the detector version string changed:
 
 ```json
-{"unit_id":"test-unit-1","last_cycle":31,"anomaly_score":3.5973,"normalized_score":0.6657,"threshold":5.4036,"is_anomalous":false,"model_version":"anomaly-20261108-a25df0e","series":null}
-{"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-a25df0e","series":null}
+{"unit_id":"test-unit-1","last_cycle":31,"anomaly_score":3.5973,"normalized_score":0.6657,"threshold":5.4036,"is_anomalous":false,"model_version":"anomaly-20261108-4734b37","raw_normalized_score":0.6657,"smoothed":false,"cycles_in_smoothing":null,"series":null}
+{"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-4734b37","raw_normalized_score":1.1015,"smoothed":false,"cycles_in_smoothing":null,"series":null}
 ```
 
 With `?include_series=true` (engine 34; 174 = 203 − 30 + 1 entries, first and last three shown):
 
 ```json
-{"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-a25df0e",
- "series":[{"cycle":30,"normalized_score":0.8445},{"cycle":31,"normalized_score":0.8533},{"cycle":32,"normalized_score":0.8337}, …, {"cycle":201,"normalized_score":1.1271},{"cycle":202,"normalized_score":1.1481},{"cycle":203,"normalized_score":1.1015}]}
+{"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-4734b37","raw_normalized_score":1.1015,"smoothed":false,"cycles_in_smoothing":null,
+ "series":[{"cycle":30,"normalized_score":0.8445,"raw_normalized_score":0.8445},{"cycle":31,"normalized_score":0.8533,"raw_normalized_score":0.8533},{"cycle":32,"normalized_score":0.8337,"raw_normalized_score":0.8337}, …, {"cycle":201,"normalized_score":1.1271,"raw_normalized_score":1.1271},{"cycle":202,"normalized_score":1.1481,"raw_normalized_score":1.1481},{"cycle":203,"normalized_score":1.1015,"raw_normalized_score":1.1015}]}
 ```
+
+**If smoothing were enabled** (`smoothing_enabled: true`, the M11 behaviour, kept in code and tested): the score becomes the EWM over **every full-window cycle in the request**. The last-cycle score then depends on how many cycles are sent, so clients would have to send the full history; `cycles_in_smoothing` = cycles sent − 29. The M11 bodies were, for example, engine 34: `normalized_score` 1.0472 (smoothed threshold 5.0906, `cycles_in_smoothing` 174); engine 1: 0.7277 (2 cycles). Sending 60 vs 203 cycles of engine 34 gives the same `raw_normalized_score` (tested).
 
 | Field | Type | Rule |
 |---|---|---|
 | `unit_id` | string \| null | Echoed from the request. |
 | `last_cycle` | int | Last cycle of the request. |
-| `anomaly_score` | float | Mahalanobis distance of the last full-window row to the healthy reference (4 decimals). Depends only on the last 30 records. |
+| `anomaly_score` | float | **Served (ADR-039):** the last row's Mahalanobis distance, which depends only on the last 30 records. Only if `smoothed` were true: EWM (half-life 10) over all full-window cycles sent. 4 decimals. |
 | `normalized_score` | float | `anomaly_score / threshold` (4 decimals); > 1 means anomalous. |
-| `threshold` | float | 99th percentile of out-of-fold healthy-row scores (4 decimals). |
+| `threshold` | float | 99th percentile of out-of-fold healthy-row scores, raw 5.4036 as served; it would be the smoothed threshold 5.0906 only if `smoothed` were true. 4 decimals. |
 | `is_anomalous` | bool | `normalized_score > 1` (computed before rounding). |
-| `model_version` | string | Anomaly detector version (`anomaly-YYYYMMDD-<sha7>`). |
-| `series` | list \| null | Only with `include_series=true`: `{cycle, normalized_score}` for every cycle with a full trailing window (`cycles_received − 30 + 1` entries, last entry = `normalized_score`). |
+| `model_version` | string | Anomaly detector version (`anomaly-YYYYMMDD-<sha7>`; M11 run: `anomaly-20261108-4734b37`, same detector parameters as M9). |
+| `raw_normalized_score` | float \| null | Unsmoothed last-row distance / raw threshold (the M9 score); depends only on the last 30 records. |
+| `smoothed` | bool | Whether the EWM was applied (ADR-038). **`false` as served** (ADR-039, `smoothing_enabled: false`); present but inactive. |
+| `cycles_in_smoothing` | int \| null | Full-window cycles the EWM covered (cycles sent − 29); `null` without smoothing, i.e. **`null` as served** (ADR-039). |
+| `series` | list \| null | Only with `include_series=true`: `{cycle, normalized_score, raw_normalized_score}` for every cycle with a full trailing window (`cycles_received − 30 + 1` entries, last entry = the top-level values). |
 
-The score is an unsupervised health indicator, not a validated fault detector; its trend target was not met (16 §10).
+The score is an unsupervised health indicator, not a validated fault detector; its trend target was not met by the raw score (FR-019). The one pre-registered remedy, smoothing (FR-021), was not met either and was rejected for serving (16 §10d).
 
 ## 5. Status codes
 

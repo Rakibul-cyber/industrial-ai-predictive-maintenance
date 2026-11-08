@@ -90,7 +90,11 @@ class ModelService:
         series = None
         if result.series is not None:
             series = [
-                {"cycle": p["cycle"], "normalized_score": round(p["normalized_score"], 4)}
+                {
+                    "cycle": p["cycle"],
+                    "normalized_score": round(p["normalized_score"], 4),
+                    "raw_normalized_score": round(p["raw_normalized_score"], 4),
+                }
                 for p in result.series
             ]
         return AnomalyResponse(
@@ -101,6 +105,11 @@ class ModelService:
             threshold=round(result.threshold, 4),
             is_anomalous=result.is_anomalous,
             model_version=result.model_version,
+            raw_normalized_score=None
+            if result.raw_normalized_score is None
+            else round(result.raw_normalized_score, 4),
+            smoothed=result.smoothed,
+            cycles_in_smoothing=result.cycles_in_smoothing,
             series=series,
         )
 
@@ -194,6 +203,14 @@ class ModelService:
             detection_true_rul_median=train["detection"]["true_rul_at_detection"]["median"],
             never_flagged_fraction=train["detection"]["never_flagged_fraction"],
             acceptance_met=meta["evaluation"]["acceptance"]["met"],
+            smoothing=self.anomaly.smoothing,
+            smoothing_enabled=self.anomaly.smoothing_enabled,
+            smoothed_threshold=self.anomaly.smoothed_threshold,
+            smoothed_acceptance_met=None
+            if "smoothed" not in meta
+            else meta["smoothed"]["evaluation"]["acceptance"]["met"],
+            evaluation_raw=meta["evaluation"],
+            evaluation_smoothed=None if "smoothed" not in meta else meta["smoothed"]["evaluation"],
         )
 
     def _intervals_info(self) -> IntervalsInfo | None:
@@ -276,5 +293,8 @@ def expected_prediction(
             "threshold": round(scored.threshold, 4),
             "is_anomalous": scored.is_anomalous,
             "model_version": scored.model_version,
+            "raw_normalized_score": round(scored.raw_normalized_score, 4),  # type: ignore[arg-type]
+            "smoothed": scored.smoothed,
+            "cycles_in_smoothing": scored.cycles_in_smoothing,
         },
     }

@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **MVP COMPLETE** (M0–M7) + M8 (intervals, `a25df0e`) + M9 (anomaly detection, `1e728ca`; FR-019 not met) + **Milestone 10 (CQR interval calibration, CR-011) COMPLETE** — uncommitted, awaiting review. FR-020 **met, narrowly** (0.777 in 0.77–0.83). |
-| Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `d9b9772` (M9 `1e728ca` + screenshots, committed and pushed by the user; CI run 42520315423 green). M10 work is uncommitted. |
-| Next approved action | User review and commit of M10: `models/model_intervals_metadata.json`, `reports/metrics_intervals.json` and `examples/expected_predictions.json` together with the code (the `.joblib` files are unchanged). The push runs the CI `docker` job with the `interval_calibrated` assertion. Rebuild the running demo stack with `--build` (it still runs the pre-M10 image). Further work goes through 15. |
+| Current milestone | **MVP COMPLETE** (M0–M7) + M8 (intervals, `a25df0e`) + M9 (anomaly, `1e728ca`; FR-019 not met) + M10 (CQR, `4734b37`; FR-020 met narrowly) + **Milestone 11 (smoothed anomaly score, CR-012) CLOSED** — FR-021 not met; remedy rejected, raw score served (ADR-039). Uncommitted, ready for commit. |
+| Last updated | 2026-11-09 |
+| Git ref | `main` = `origin/main` @ `4734b37` (M10, committed and pushed by the user; CI run 42522391649 green). M11 work is uncommitted. |
+| Next approved action | User commit of M11 + close-out: code, tests, `.github/workflows/ci.yml`, `models/model_anomaly_metadata.json`, `reports/metrics_anomaly.json`, `examples/expected_predictions.json`, docs (no `.joblib` changed). The push runs CI with `fetch-depth: 0` (the M9-artifact comparison test should then run, not skip) and the `docker` job with the `smoothed: false` assertion. Rebuild the demo stack with `--build`. Further work goes through 15. |
 
 ## Milestone tracker
 
@@ -21,7 +21,8 @@
 | M7 Finalisation | **COMPLETE** 2026-11-08; committed `32fdae0` | M7 section below |
 | M8 Prediction intervals (CR-008, ADR-034) | **COMPLETE** 2026-11-08; committed `a25df0e`, pushed; CI run 42514386686 green | M8 section below |
 | M9 Minimal anomaly detection (CR-010, ADR-035) | **COMPLETE** 2026-11-08; committed `1e728ca`, pushed; CI green; FR-019 trend target **not met** | M9 section below |
-| M10 CQR interval calibration (CR-011, ADR-037) | **COMPLETE** 2026-11-08 (uncommitted, awaiting review); FR-020 **met, narrowly** | M10 section below |
+| M10 CQR interval calibration (CR-011, ADR-037) | **COMPLETE** 2026-11-08; committed `4734b37`, pushed; CI green; FR-020 **met, narrowly** | M10 section below |
+| M11 Smoothed anomaly score (CR-012, ADR-038, ADR-039) | **CLOSED** 2026-11-09 (uncommitted, ready for commit); FR-021 **NOT MET**; remedy rejected, raw score served | M11 + close-out sections below |
 
 ## M0 — what was verified (actual command results)
 
@@ -550,6 +551,99 @@ $ pytest -q -m data --no-cov → 13 passed · DATA_DIR=/nonexistent pytest -q �
 - The anomaly metadata records `git_dirty: true` (trained on the uncommitted M9 tree on top of `a25df0e`); its `model_version` is therefore `anomaly-20261108-a25df0e`.
 - Coverage of `src/predmaint`: 95.92 % (from 95.42 %); `models/anomaly.py` 99 %.
 
+## M11 close-out — serve the raw score, smoothing retained as a disabled experiment (2026-11-09)
+
+**Decision:** ADR-039 supersedes ADR-038's serving clause. **Mechanism:** an explicit `smoothing_enabled: false` in `models/model_anomaly_metadata.json`, written by `scripts/train.py --model anomaly` (`SMOOTHING_ENABLED = False`). A flag is clearer than deleting keys because the smoothing config, smoothed threshold (5.0906) and smoothed evaluation stay in the metadata, the report and `/model/info.anomaly`. `AnomalyModel.smoothing_enabled` treats metadata with `smoothing` but no flag as enabled (M11 semantics) and metadata without `smoothing` as raw (M9).
+
+```text
+$ python scripts/train.py --model anomaly   → evaluation unchanged (FR-019 0.680 NOT MET; FR-021 trend 0.693 NOT met, false-alarm 0.0101 met → NOT MET)
+  metadata: smoothing_enabled False | smoothing {'method': 'ewm', 'halflife': 10, 'adjust': True} | smoothed threshold 5.090594528745487 | version anomaly-20261108-4734b37
+$ shasum -a 256 models/model.joblib models/model_intervals.joblib models/model_anomaly.joblib      (unchanged)
+39bfa6fd…28c1  model.joblib · 9c7cfc5e…6d12  model_intervals.joblib · 3f39354f…89b9  model_anomaly.joblib
+$ curl /health → {…"api_version":"0.5.0","intervals_loaded":true,"anomaly_loaded":true}      (local API, port 8001)
+$ curl -X POST /anomaly @examples/predict_request.json → {"unit_id":"test-unit-1","last_cycle":31,"anomaly_score":3.5973,"normalized_score":0.6657,"threshold":5.4036,"is_anomalous":false,"model_version":"anomaly-20261108-4734b37","raw_normalized_score":0.6657,"smoothed":false,"cycles_in_smoothing":null,"series":null}
+$ curl -X POST /anomaly @examples/predict_request_late.json → {"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.9519,"normalized_score":1.1015,"threshold":5.4036,"is_anomalous":true,"model_version":"anomaly-20261108-4734b37","raw_normalized_score":1.1015,"smoothed":false,"cycles_in_smoothing":null,"series":null}
+$ series (engine 34): 174 entries, normalized_score == raw_normalized_score (first 0.8445, 0.8533, 0.8337 … last 1.1271, 1.1481, 1.1015)
+$ /model/info anomaly → {"threshold": 5.40363364967852, "smoothing": {…}, "smoothing_enabled": false, "smoothed_threshold": 5.090594528745487, "acceptance_met": false, "smoothed_acceptance_met": false}
+$ bash scripts/smoke_test.sh; echo $?   (ports 18000/18501)
+  /anomaly engine 1 → … "normalized_score":0.6657 … "smoothed":false,"cycles_in_smoothing":null · engine 34 → "normalized_score":1.1015,"is_anomalous":true,…,"smoothed":false
+  SMOKE TEST PASSED (arm64) · exit code 0
+$ ruff check . → All checks passed!  ·  ruff format --check . → 70 files already formatted
+$ pytest -q → Required test coverage of 85% reached. Total coverage: 96.39% · 285 passed, 2 skipped
+```
+
+**Changes:**
+
+- **Sidecar:** anomaly blocks back to the raw values (engine 1 0.6657, engine 34 1.1015, threshold 5.4036) with `smoothed: false`, `cycles_in_smoothing: null`. Against the committed `4734b37` sidecar, only the detector `model_version` string and the three new fields differ; point and interval values are unchanged.
+- **Smoke test:** asserts `smoothed: false` for both examples, `cycles_in_smoothing` null and engine 34 `normalized_score == raw_normalized_score == 1.1015` (anomalous).
+- **Dashboard:**
+  - The explorer badge and caption use the served raw score.
+  - With smoothing disabled the series carries no separate smoothed values, so the trajectory chart shows the raw line only, and the caption says smoothing was evaluated but is not served (`helpers.anomaly_chart_caption`).
+  - The model-info table columns read "raw score (M9, served)" and "EWM half-life 10 (smoothed: evaluated, not served)".
+- **Tests (only what the decision changed):**
+  - The `/anomaly` exact body now expects `smoothed: false`, `cycles_in_smoothing: null`, raw == normalised; the series test checks raw serving.
+  - The smoothing-path tests (synthetic series, history dependence, real-data engine 34) now use an explicitly enabled variant (`smoothing_enabled: true`).
+  - Added: flag semantics, served-raw test incl. last-window property, chart caption, table labels, an AppTest for the raw-only chart, and the real-data check that a retrain writes `smoothing_enabled: false`.
+- **CI (logged here, one-line change):** `.github/workflows/ci.yml`, job `lint-test`, checkout step gains `with: fetch-depth: 0`, so `test_anomaly_detector_parameters_identical_to_m9` can read `1e728ca:models/model_anomaly.joblib` instead of skipping. Not yet exercised in CI (**UNVERIFIED** until the next push). The YAML was not parsed locally because PyYAML is not installed; the edit mirrors the existing `with:` block of the next step.
+- **Docs:** 06, 11, 13 (ADR-039; ADR-038 index marked "serving clause superseded"), 14, 15 (CR-012 outcome), 16 §10d (verdict + detection trade-off table), 17 (Q&A 14 rewritten), README. **Outside the listed docs**, statements that would otherwise be false were corrected and nothing else changed: 02 (anomaly flow and dashboard bullets), 05 (§10b table header, inference sentence, limitation), 12 (R17), CLAUDE.md (API line).
+
+## M11 — smoothed anomaly score, FR-019 re-test (2026-11-08)
+
+**Start:** working tree clean; `main` = `origin/main` @ `4734b37`; CI run 42522391649 (on `4734b37`) `completed / success` (GitHub REST API).
+
+**Housekeeping (no ADR):** the dashboard's Model info → Prediction intervals table now shows the calibrated M10 figures from `/model/info` in a first row, labelled `Calibrated (CQR, Q = 1.742)`: held-out-engine coverage after calibration, test coverage (clipped and unclipped) and mean widths. The uncalibrated M8 figures follow in a second row for comparison, and the caption states the FR-020 verdict and the exchangeability caveat. Uncalibrated metadata falls back to the old table. `helpers.interval_coverage_table`, tested.
+
+**Change control first:** CR-012, ADR-038, FR-021 (criterion pre-registered) and the M11 plan were written **before** any smoothed number was computed. CR-012 quotes M9's actual wording ("diluted by the long flat early phase, where the score is noise around the healthy level") instead of a paraphrase. ADR-038 recorded in advance that the false-alarm condition is ≈ 0.01 by construction, so the trend is the binding condition.
+
+```text
+$ shasum -a 256 models/model.joblib models/model_intervals.joblib models/model_anomaly.joblib      (before)
+39bfa6fd…28c1  model.joblib · 9c7cfc5e…6d12  model_intervals.joblib · 3f39354f…89b9  model_anomaly.joblib
+$ python scripts/train.py --model anomaly        (the M9 lines [1]–[5] are unchanged and omitted)
+FR-019 acceptance (median per-engine Spearman(score, cycle) on train OOF > 0.7): value 0.680 → NOT MET
+Timing: OOF evaluation 0.07 s
+Side by side (smoothing: ewm halflife=10, adjust=True). Thresholds (OOF q0.99): raw 5.4036 | smoothed 5.0906
+  metric                                                                  raw               smoothed
+  [1] train OOF trend median (IQR)                        0.680 (0.506–0.818)    0.693 (0.394–0.857)
+  [1] train OOF share > 0.7                                             0.460                  0.470
+  [1] test trend median                                                 0.213                  0.344
+  [1] test trend median, true RUL <=60 (n)                       0.517 (n=39)           0.530 (n=39)
+  [1] test trend median, true RUL 61-125 (n)                     0.040 (n=49)           0.298 (n=49)
+  [1] test trend median, true RUL >125 (n)                      -0.320 (n=11)          -0.313 (n=11)
+  [2] false-alarm rate, healthy OOF rows                               0.0101                 0.0101
+  [3] detection: fraction of life, median                               0.758                  0.792
+  [3] detection: true RUL, median (IQR)                      49.0 (26.0–75.8)       44.0 (27.2–62.5)
+  [3] never flagged                                                     0.020                  0.160
+  [4] test flagged at last cycle, overall                               0.250                  0.230
+  [4] test flagged, true RUL 0-20 (n)                            0.750 (n=16)           0.688 (n=16)
+  [4] test flagged, true RUL 21-60 (n)                           0.391 (n=23)           0.348 (n=23)
+  [4] test flagged, true RUL 61-125 (n)                          0.080 (n=50)           0.080 (n=50)
+  [4] test flagged, true RUL >125 (n)                            0.000 (n=11)           0.000 (n=11)
+  [5] Spearman with RUL prediction (test last cycle)                   -0.613                 -0.568
+FR-021 (median per-engine Spearman(smoothed score, cycle) on train OOF > 0.7 AND false-alarm rate on healthy OOF rows <= 0.02): trend 0.693 (NOT met), false-alarm 0.0101 (met) → NOT MET
+Elapsed: 0.5 s     [time -p: real 2.38]
+$ shasum -a 256 …      (after: identical — 39bfa6fd…28c1 · 9c7cfc5e…6d12 · 3f39354f…89b9)
+$ curl /health → {…"api_version":"0.5.0","intervals_loaded":true,"anomaly_loaded":true}      (local API, port 8001)
+$ curl -X POST /anomaly @examples/predict_request.json → {"unit_id":"test-unit-1","last_cycle":31,"anomaly_score":3.7045,"normalized_score":0.7277,"threshold":5.0906,"is_anomalous":false,"model_version":"anomaly-20261108-4734b37","raw_normalized_score":0.6657,"smoothed":true,"cycles_in_smoothing":2,"series":null}
+$ curl -X POST /anomaly @examples/predict_request_late.json → {"unit_id":"test-unit-34","last_cycle":203,"anomaly_score":5.331,"normalized_score":1.0472,"threshold":5.0906,"is_anomalous":true,"model_version":"anomaly-20261108-4734b37","raw_normalized_score":1.1015,"smoothed":true,"cycles_in_smoothing":174,"series":null}
+$ curl -X POST "/anomaly?include_series=true" @examples/predict_request_late.json → 174 entries; first 3: {30: 0.8964 / raw 0.8445}, {31: 0.9012 / 0.8533}, {32: 0.8954 / 0.8337} … last 3: {201: 1.0255 / 1.1271}, {202: 1.0385 / 1.1481}, {203: 1.0472 / 1.1015}
+$ bash scripts/smoke_test.sh; echo $?     (ports 18000/18501; demo stack on 8000/8501 not touched)
+  /anomaly engine 1 → … "smoothed":true,"cycles_in_smoothing":2 · engine 34 → "normalized_score":1.0472,"is_anomalous":true,…,"cycles_in_smoothing":174
+  SMOKE TEST PASSED (arm64) · exit code 0 · image content 243,202,432 bytes
+$ ruff check . → All checks passed!  ·  ruff format --check . → 70 files already formatted
+$ pytest -q → Required test coverage of 85% reached. Total coverage: 96.36% · 281 passed, 2 skipped
+$ pytest -q -m data --no-cov → 17 passed · DATA_DIR=/nonexistent pytest -q → 268 passed, 15 skipped; coverage 96.25%
+```
+
+**Findings:**
+
+- **FR-021 NOT MET:** the smoothed trend median is 0.693 (+0.013 over raw); the false-alarm part (0.0101) holds by construction. No other half-life was tried. Title unchanged; no ADR-036; no title grep classification needed.
+- **Smoothing costs detection:** 16 % of training engines are never flagged (raw 2 %); detection comes at a median 44 cycles left (raw 49); test flags near failure drop (0–20: 0.750 → 0.688). Engine 34 is still anomalous, narrowly (1.0472).
+- **Served flag (as authorized):** `is_anomalous` now uses the smoothed score. It did not meet FR-021 and flags later than the raw score, so this is flagged as a decision for the user (next action). Reverting is a metadata edit; a test covers M9 behaviour without `smoothing`.
+- **History dependence:** the smoothed score uses every full-window cycle sent. Engine 34 with 60 vs 203 cycles gives the same `raw_normalized_score` and `cycles_in_smoothing` 31 vs 174 (real-data test). Documented in 06 §4a and 16 §10d. Engine 1 (31 cycles) has 2 smoothed cycles. Its distance barely changes (3.5973 → 3.7045); its normalised score moves 0.6657 → 0.7277 mainly because the smoothed threshold is lower.
+- **Detector unchanged:** `model_anomaly.joblib` is byte-identical, and a real-data test compares scaler and covariance parameters with the M9 artifact (`git show 1e728ca:models/model_anomaly.joblib`). The anomaly `model_version` changed to `anomaly-20261108-4734b37` because it embeds the git SHA of the training run; the sidecar's anomaly blocks changed accordingly, point and interval values did not.
+- **Existing tests changed only for the new design:** the exact `/anomaly` body gained the three fields. `test_score_anomaly_series_and_last_value` no longer asserts that the last-cycle score depends only on the last 30 records, because that is false for the smoothed score by design (ADR-038). It now checks the series against `ewm_smooth`, and the raw last-window property moved to the new history-dependence test.
+- **Dashboard beyond the chart and badge:** the explorer caption names the smoothing, and the model-info anomaly table shows raw and smoothed columns (both verdicts), so it no longer shows only the raw M9 numbers.
+
 ## M10 — conformalized quantile regression (2026-11-08)
 
 **Start:** working tree clean; `main` = `origin/main` @ `d9b9772`; CI run 42520315423 (on `d9b9772`) `completed / success`, read from the GitHub REST API (no `gh` CLI on this machine). **Change control first:** CR-011, ADR-037, FR-020 (target pre-registered), M10 plan and doc 00 scope were written **before** any calibration number was computed. ADR-036 is unused (it was reserved in M9 for a title restoration that was not triggered). **Before code changes:** re-running the existing interval step on a copy of the served model reproduced `model_intervals.joblib` byte-for-byte, so the training command could gain the calibration without changing the shipped models.
@@ -636,3 +730,5 @@ The first trajectory and upload screenshots showed empty tabs, so the owner supp
 | **M8** | 208 passed, 2 skipped; 12 real-data tests; coverage 95.42 %; intervals CV coverage 0.509 / 0.737 (unclipped / clipped), test 0.740 / 0.820; smoke test exit 0 | M8 |
 | **M9** | 251 passed, 2 skipped; 13 real-data tests; coverage 95.92 %; anomaly trend median 0.680 train OOF (target > 0.7, **not met**), 0.213 test; false-alarm rate 0.0101; detection at median 0.758 of life / 49 cycles RUL; test flags 0.750 (RUL ≤ 20) → 0.000 (> 125); smoke test exit 0 | M9 |
 | **M10** | 264 passed, 2 skipped; 15 real-data tests; coverage 96.14 %; CQR Q_eval 1.320 / Q_final 1.742; held-out-engine coverage 0.734 → 0.777 (capped; FR-020 met, band 0.77–0.83); test 0.820 → 0.850 (capped), 0.740 → 0.750 (unclipped); artifacts byte-identical; smoke test exit 0 | M10 |
+| **M11** | 281 passed, 2 skipped; 17 real-data tests; coverage 96.36 %; smoothed anomaly threshold 5.0906 (raw 5.4036); trend median 0.693 smoothed vs 0.680 raw (FR-021 **not met**); false-alarm 0.0101 both; never flagged 0.160 vs 0.020; all `.joblib` byte-identical; smoke test exit 0 | M11 |
+| **M11 close-out** | 285 passed, 2 skipped; coverage 96.39 %; raw score served (`smoothed: false`, engine 34 1.1015 anomalous); smoothing retained, `smoothing_enabled: false`; all `.joblib` byte-identical; smoke test exit 0 | ADR-039 |

@@ -11,7 +11,7 @@ Portfolio-grade, end-to-end ML system: RUL regression on NASA C-MAPSS **FD001**,
 - Target: `RUL = max_cycle − cycle`, clipped at 125 (configurable). Features: kept sensors (≤ 2 unique values dropped), trailing rolling mean/std over 30 cycles, plus `cycle`; settings excluded; only rows with `cycle ≥ 30`.
 - Baseline `StandardScaler + Ridge`; primary `HistGradientBoostingRegressor` from one bounded 12-config search (ADR-026). 5-fold GroupKFold by unit; official test at last cycle; MAE/RMSE primary, NASA score secondary. Served model = lower CV RMSE (ADR-024); test metrics reported, never used for selection. Predictions clamped to [0, RUL_CAP] (ADR-027); health status critical < 20 ≤ warning < 60 ≤ healthy (ADR-025).
 - Artifacts: `models/model.joblib` + `models/model_metadata.json`; plus `model_intervals.*` (M8; CQR `conformal_q` in its metadata since M10) and `model_anomaly.*` (M9), each tied to the served model by `for_model_version`.
-- API: `GET /health`, `POST /predict`, `POST /anomaly` (M9), `GET /model/info`, error envelope `{"error": {code, message, details}}`.
+- API: `GET /health`, `POST /predict`, `POST /anomaly` (M9; raw score served — M11 smoothing evaluated, not served, ADR-039), `GET /model/info`, error envelope `{"error": {code, message, details}}`.
 - Dashboard calls the API over HTTP (`API_BASE_URL`), never imports `predmaint.models`.
 - One Docker image, compose services `api` (8000) and `dashboard` (8501); served model committed and baked into the image (ADR-030/032); `./data` bind-mounted, FD001 downloaded by the dashboard on first start (ADR-031).
 - ADR status: architecture frozen 2026-11-08 — ADR-001…022 *Accepted* (docs/13). Changes only via docs/15.
@@ -66,14 +66,14 @@ FD001 only. No anomaly detection beyond the M9 detector, other subsets, deep lea
 
 ## Project state: MVP COMPLETE (2026-11-08)
 
-All milestones M0–M7 are complete (docs/08, docs/14); post-MVP Milestone 8 (prediction intervals, CR-008 / ADR-034) Milestone 9 (minimal anomaly detection, CR-010 / ADR-035; implemented, trend target not met) and Milestone 10 (CQR interval calibration, CR-011 / ADR-037; FR-020 met narrowly) are complete. The MVP is frozen: **any further work, including fixes, goes through change control (docs/15)** and needs explicit user authorization as a new milestone.
+All milestones M0–M7 are complete (docs/08, docs/14); post-MVP Milestone 8 (prediction intervals, CR-008 / ADR-034) Milestone 9 (minimal anomaly detection, CR-010 / ADR-035; implemented, trend target not met) Milestone 10 (CQR interval calibration, CR-011 / ADR-037; FR-020 met narrowly) and Milestone 11 (smoothed anomaly score, CR-012 / ADR-038; FR-021 not met, title unchanged) are complete. The MVP is frozen: **any further work, including fixes, goes through change control (docs/15)** and needs explicit user authorization as a new milestone.
 
 Candidate next milestones (**NOT IMPLEMENTED, NOT authorized**; details in docs/16 §8):
 
 - FD002–FD004 support (per-regime normalisation, regime-aware features)
 - Conditional (per-RUL-range) interval calibration (M10's single CQR correction leaves the 21–60 range at 0.687, docs/16 §9d)
 - Bias correction for the 21–60-cycle range (optimistic predictions)
-- Anomaly detection beyond the minimal M9 detector (e.g. engine-specific baselines; M9 missed its trend target, docs/16 §10)
+- Anomaly detection beyond the M9/M11 detector (e.g. engine-specific baselines; the trend target was missed raw in M9 and smoothed in M11, docs/16 §10, §10d)
 - Sequence models (LSTM/CNN/Transformer) under the same CV protocol
 - Input-drift monitoring and a retraining trigger
 - Smoke-test assertion that the dashboard's FD001 download succeeded (Linux bind-mount write path)

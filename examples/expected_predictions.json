@@ -16,7 +16,10 @@
       "normalized_score": 0.6657,
       "threshold": 5.4036,
       "is_anomalous": false,
-      "model_version": "anomaly-20261108-a25df0e"
+      "model_version": "anomaly-20261108-4734b37",
+      "raw_normalized_score": 0.6657,
+      "smoothed": false,
+      "cycles_in_smoothing": null
     }
   },
   "predict_request_min.json": {
@@ -36,7 +39,10 @@
       "normalized_score": 0.6657,
       "threshold": 5.4036,
       "is_anomalous": false,
-      "model_version": "anomaly-20261108-a25df0e"
+      "model_version": "anomaly-20261108-4734b37",
+      "raw_normalized_score": 0.6657,
+      "smoothed": false,
+      "cycles_in_smoothing": null
     }
   },
   "predict_request_late.json": {
@@ -56,7 +62,10 @@
       "normalized_score": 1.1015,
       "threshold": 5.4036,
       "is_anomalous": true,
-      "model_version": "anomaly-20261108-a25df0e"
+      "model_version": "anomaly-20261108-4734b37",
+      "raw_normalized_score": 1.1015,
+      "smoothed": false,
+      "cycles_in_smoothing": null
     }
   }
 }
