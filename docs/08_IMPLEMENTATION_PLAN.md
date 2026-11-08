@@ -173,30 +173,36 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** tests pass; the dashboard produced real `/predict` calls visible in the API log; displayed values recorded in 14; API-down and dataset-absent behaviour verified.
 - **Estimated effort:** 3 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
 
-## M6 — Containerisation
+## M6 — Containerisation, test finalisation, CI docker job
 
-- **Objective:** both services run via Docker Compose with the mounted artifact.
+- **Objective:** a fresh clone runs both services via Docker Compose with no training step; the test suite is gated on coverage; CI builds and smoke-tests the image.
 - **Dependencies:** M5.
-- **Requirements:** FR-017.
-- **Files to create:** `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `tests/test_docker_smoke.py`.
-- **Files to modify:** `docs/10_DEPLOYMENT_PLAN.md` (pinned image digest), `docs/14_PROJECT_STATUS.md`.
+- **Requirements:** FR-017 (and NFR-005 gate, NFR-008).
+- **Files to create:** `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `scripts/smoke_test.sh`, `tests/test_docker_smoke.py`, `tests/test_model_artifact.py`; commit `models/model.joblib`.
+- **Files to modify:** `.gitignore` (`!models/model.joblib`), `pyproject.toml` (coverage gate in `addopts`, marker docs), `.github/workflows/ci.yml` (`docker` job), `.env.example` (`APP_UID`/`APP_GID`), README (badge, Quickstart Option A/B), CLAUDE.md, docs 01, 02, 03, 07, 08, 09, 10, 11, 12, 13, 14.
 - **Tasks:**
-  - M6-T1 Dockerfile per [10](10_DEPLOYMENT_PLAN.md) §4; pin `python:3.13-slim@sha256:<digest>` (record digest; R9).
-  - M6-T2 Compose per 10 §4 (api healthcheck, read-only model mount, dashboard `API_BASE_URL=http://api:8000`, `DATA_DIR` mount read-only).
-  - M6-T3 Smoke test (marker `docker`): `compose up -d --build`, poll `/health` ≤ 60 s, POST a payload, assert 200 + `predicted_rul ≥ 0`, `compose down`.
-  - M6-T4 Decide whether the FD001 `model.joblib` is small enough to commit (ADR-022): measure its size with `ls -l models/`, record the decision and rationale in 13 and 10 §5; if committed, adjust `.gitignore` and the demo path (11 AC-22) accordingly.
+  - [x] M6-T1 Dockerfile: single stage, `python:3.13-slim@sha256:e48f59cd…ed90`, wheels only (`--only-binary=:all:`), non-root `app`, model baked in (ADR-032). Digest recorded (R9 closed).
+  - [x] M6-T2 Compose: `api` + `dashboard` from one image; `model_loaded` healthcheck; `/_stcore/health` healthcheck; `service_healthy` dependency; `./data` bind mount with first-start download (ADR-031); 127.0.0.1 ports; `unless-stopped`.
+  - [x] M6-T3 Smoke test `scripts/smoke_test.sh` (+ `docker` marker wrapper); verified pass (exit 0) and forced failure (exit 1, teardown done).
+  - [x] M6-T4 Commit the served artifact (ADR-030) + `test_model_artifact.py` (scikit-learn pin, reproduces the sidecar) — decided: commit.
+  - [x] M6-T5 Coverage gate 85 % in pytest config; markers documented.
+  - [x] M6-T6 CI `docker` job on `ubuntu-24.04` (amd64 outcome recorded after the user's push); README badge.
 - **Verification commands:**
 
   ```bash
-  docker compose build
-  docker compose up -d && docker compose ps
-  curl -s localhost:8000/health && curl -sI localhost:8501 | head -1
-  RUN_DOCKER_TESTS=1 pytest -v -m docker
+  ruff check . && ruff format --check .
+  pytest -q                                     # shows "Required test coverage of 85% reached"
+  docker build -t predmaint:latest . && docker images predmaint
+  docker compose up -d --build && docker compose ps
+  curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request.json
+  curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request_late.json
+  docker compose logs dashboard                 # first start: download; restart: "already present"
   docker compose down
+  bash scripts/smoke_test.sh; echo "exit=$?"
   ```
 
-- **Acceptance criteria:** image builds; `api` healthy; dashboard returns HTTP 200; smoke test passes; outputs recorded in 14.
-- **Estimated effort:** 3 h · **Status:** Not started.
+- **Acceptance criteria:** image builds; both services healthy; containerised predictions == sidecar; dashboard downloaded FD001 on first start and skipped on restart; smoke test passes (exit 0) and fails non-zero on error; coverage gate passes; outputs recorded in 14.
+- **Estimated effort:** 4 h · **Status:** Complete 2026-11-08 locally on arm64 (uncommitted, awaiting review); amd64 confirmation is pending the CI `docker` job after the user's push.
 
 ## M7 — Finalisation and release readiness
 

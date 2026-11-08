@@ -1,6 +1,8 @@
-# Lint + tests on every push / PR to main (docs/09 §5).
-# CI uses synthetic fixtures only and does not download the dataset (ADR-021):
-# `data` tests skip, `network`/`docker` tests are gated off.
+# Lint + tests (with the 85 % coverage gate from pyproject.toml) and a Docker smoke test on every
+# push / PR to main (docs/09 §5). The lint-test job uses synthetic fixtures only and does not
+# download the dataset (ADR-021): `data` tests skip, `network`/`docker` tests are gated off.
+# The docker job builds the image on the amd64 runner and runs scripts/smoke_test.sh (which
+# does download FD001 into the dashboard's bind mount, as on a fresh clone).
 name: CI
 
 on:
@@ -37,5 +39,14 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
 
-      - name: Tests
-        run: pytest -v --cov=predmaint --cov-report=term-missing
+      - name: Tests (coverage gate 85 %)
+        run: pytest -v
+
+  docker:
+    needs: lint-test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Docker smoke test (build, compose up, healthchecks, /predict, teardown)
+        run: bash scripts/smoke_test.sh

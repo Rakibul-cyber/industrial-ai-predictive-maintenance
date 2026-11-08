@@ -25,11 +25,13 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+# Coverage gate (docs/09 §6): CI and plain `pytest` fail below 85 %. Running a subset of tests?
+# add --no-cov, otherwise the gate counts only that subset.
+addopts = "-ra --cov=predmaint --cov-report=term-missing:skip-covered --cov-fail-under=85"
 markers = [
     "data: needs the real FD001 files under DATA_DIR (skipped when absent)",
     "network: downloads from the NASA S3 URL (runs only with RUN_NETWORK_TESTS=1)",
-    "docker: needs Docker Compose (runs only with RUN_DOCKER_TESTS=1)",
+    "docker: builds the image and runs scripts/smoke_test.sh (runs only with RUN_DOCKER_TESTS=1; use --no-cov)",
 ]
 filterwarnings = ["error::DeprecationWarning"]
 

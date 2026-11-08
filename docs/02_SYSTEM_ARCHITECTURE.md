@@ -78,8 +78,8 @@ Confirmed in M5 (the API server log shows the dashboard's real calls; 14 §M5):
 
 - Produced only by `scripts/train.py` into `MODEL_DIR` (default `models/`).
 - `model.joblib`: a fitted sklearn `Pipeline` (scaler where applicable + estimator). Feature construction parameters (`window_size`, kept sensors, feature order) live in `model_metadata.json` and are applied by `features.build`.
-- Containers receive artifacts via a read-only bind mount `./models:/app/models:ro`; artifacts are **not** baked into the image (ADR-015).
-- Loaded once at API startup (FastAPI lifespan). Metadata `library_versions.scikit-learn` is compared with the runtime version; a mismatch is logged as a warning and exposed in `/model/info`.
+- The served `model.joblib` + `model_metadata.json` are committed (ADR-030) and copied into the image (ADR-032); candidate artifacts stay local. Retraining = train + select + commit both files + rebuild (10 §6).
+- Loaded once at API startup (FastAPI lifespan). Metadata `library_versions.scikit-learn` is compared with the runtime version and exposed as `sklearn_version_match` in `/model/info`; `tests/test_model_artifact.py` fails on a mismatch.
 
 ## 8. Failure handling
 

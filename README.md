@@ -1,20 +1,40 @@
 # Industrial AI — Predictive Maintenance Platform
 
+[![CI](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml/badge.svg)](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml)
+
 Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS **FD001** dataset, served through a FastAPI service and a Streamlit dashboard.
 
-**Status:** Milestones 1–5 implemented: data acquisition & validation, features, Ridge baseline and HistGradientBoosting primary model, CV-based selection, the inference contract, the FastAPI service and the Streamlit dashboard. Measured results: [reports/model_comparison.md](reports/model_comparison.md). The Docker setup is not built yet. A CI badge will be added once the workflow badge URL is confirmed on `main`. This README is finalised in Milestone 7.
+**Status:** Milestones 1–6 implemented: data acquisition & validation, features, Ridge baseline and HistGradientBoosting primary model, CV-based selection, the inference contract, the FastAPI service, the Streamlit dashboard, Docker Compose and CI with a Docker smoke test. Measured results: [reports/model_comparison.md](reports/model_comparison.md). This README is finalised in Milestone 7.
 
-## What it will do
+## What it does
 
-- Download the dataset reproducibly from NASA with checksum verification.
-- Train a Ridge baseline and a HistGradientBoosting model with engine-grouped cross-validation, evaluate both on the official test set (MAE, RMSE, NASA score), and ship the better one with versioned metadata.
-- Serve predictions via `POST /predict` (plus `/health`, `/model/info`).
-- Show predictions and sensor trends in a dashboard that gets every result from the API.
-- Run both services with `docker compose up`.
+- Downloads the dataset reproducibly from NASA with checksum verification.
+- Trains a Ridge baseline and a HistGradientBoosting model with engine-grouped cross-validation, evaluates both on the official test set (MAE, RMSE, NASA score), and serves the one with the lower CV RMSE, with versioned metadata.
+- Serves predictions via `POST /predict` (plus `/health`, `/model/info`).
+- Shows predictions and sensor trends in a dashboard that gets every result from the API.
+- Runs both services with `docker compose up`. The served model is committed, so no training step is needed.
 
-## Quickstart (current: Milestone 5)
+## Quickstart
 
-Requires Python 3.13 (`python3`) and network access to NASA's S3 bucket.
+### Option A: Docker (recommended)
+
+Requires Docker with Compose v2. The first start downloads FD001 (~12 MB) into `./data`; later starts work offline.
+
+```bash
+git clone https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git
+cd industrial-ai-predictive-maintenance
+export APP_UID=$(id -u) APP_GID=$(id -g)   # Linux: lets the dashboard write to ./data (harmless on macOS)
+docker compose up -d --build               # API on http://localhost:8000, dashboard on http://localhost:8501
+docker compose ps                          # wait until both show "(healthy)"
+curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request_late.json
+docker compose down
+```
+
+`bash scripts/smoke_test.sh` builds, starts, checks and tears down the stack in one go (it is what CI runs). Details: [docs/10_DEPLOYMENT_PLAN.md](docs/10_DEPLOYMENT_PLAN.md).
+
+### Option B: local Python
+
+Requires Python 3.13 (`python3`) and network access to NASA's S3 bucket. The committed served model (`models/model.joblib`) works as-is; the three `train.py` commands reproduce it (they are needed only to retrain).
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -22,15 +42,15 @@ pip install -r requirements-dev.txt && pip install -e .
 python scripts/download_data.py      # downloads ~12 MB, verifies SHA-256, extracts to data/raw/CMAPSSData/
 python -m predmaint.data.validate    # checks the FD001 data contract (docs/04 §6)
 python scripts/train.py --model baseline   # Ridge: CV + official test metrics → models/, reports/
-python scripts/train.py --model primary    # HistGradientBoosting: 12-config CV search (~80 s) + test metrics
+python scripts/train.py --model primary    # HistGradientBoosting: 12-config CV search (~80 s on 8 cores) + test metrics
 python scripts/train.py --select           # promote the lower-CV-RMSE model → models/model.joblib, reports/model_comparison.md
 ruff check . && ruff format --check .
-pytest -q                            # real-data tests run when data/raw/ is present
+pytest -q                            # includes the 85 % coverage gate; real-data tests run when data/raw/ is present
 ```
 
 ## Run the API
 
-Requires the served model from the Quickstart (`models/model.joblib`). Configuration comes from environment variables (`MODEL_PATH`, `API_HOST`, `API_PORT`, `LOG_LEVEL`; see [.env.example](.env.example) and [docs/10_DEPLOYMENT_PLAN.md](docs/10_DEPLOYMENT_PLAN.md) §3).
+Uses the committed served model `models/model.joblib` (Option B environment). Configuration comes from environment variables (`MODEL_PATH`, `API_HOST`, `API_PORT`, `LOG_LEVEL`; see [.env.example](.env.example) and [docs/10_DEPLOYMENT_PLAN.md](docs/10_DEPLOYMENT_PLAN.md) §3).
 
 ```bash
 python -m predmaint.api.main          # http://127.0.0.1:8000 — interactive docs at /docs
@@ -70,7 +90,7 @@ Without the raw dataset, the explorer and trajectory show the download command; 
 
 Screenshots (added in Milestone 7): `docs/img/dashboard_explorer.png`, `docs/img/dashboard_trajectory.png`, `docs/img/dashboard_upload.png`, `docs/img/dashboard_model_info.png`.
 
-## Planned stack
+## Stack
 
 Python 3.13 · pandas · scikit-learn · FastAPI + Pydantic v2 + uvicorn · Streamlit · pytest · ruff · Docker Compose · GitHub Actions. Exact versions: [docs/03_TECH_STACK.md](docs/03_TECH_STACK.md).
 
@@ -80,4 +100,4 @@ Start with [docs/00_PROJECT_CHARTER.md](docs/00_PROJECT_CHARTER.md); current sta
 
 ## Data source
 
-NASA Prognostics Center of Excellence Data Repository. Dataset citation (as requested by the repository): A. Saxena and K. Goebel (2008). "Turbofan Engine Degradation Simulation Data Set", NASA Prognostics Data Repository, NASA Ames Research Center, Moffett Field, CA. Paper: A. Saxena, K. Goebel, D. Simon, N. Eklund, "Damage Propagation Modeling for Aircraft Engine Run-to-Failure Simulation", PHM08, 2008. No licence is stated by NASA for this dataset. The data is not redistributed in this repository; it is downloaded by script (see [docs/04_DATASET_SPECIFICATION.md](docs/04_DATASET_SPECIFICATION.md)).
+NASA Prognostics Center of Excellence Data Repository. Dataset citation (as requested by the repository): A. Saxena and K. Goebel (2008). "Turbofan Engine Degradation Simulation Data Set", NASA Prognostics Data Repository, NASA Ames Research Center, Moffett Field, CA. Paper: A. Saxena, K. Goebel, D. Simon, N. Eklund, "Damage Propagation Modeling for Aircraft Engine Run-to-Failure Simulation", PHM08, 2008. No licence is stated by NASA for this dataset. The dataset is downloaded by script (see [docs/04_DATASET_SPECIFICATION.md](docs/04_DATASET_SPECIFICATION.md)). The only NASA data committed is the small demo excerpt in `examples/` (test engines 1 and 34, ADR-029).

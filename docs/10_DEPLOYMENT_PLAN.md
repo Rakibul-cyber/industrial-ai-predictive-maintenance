@@ -1,88 +1,124 @@
 # 10 — Deployment Plan
 
-Target: **local machine only** (developer laptop / reviewer machine). Cloud deployment is out of scope (00 §6). Cost: **$0** (local compute; dataset is a free public download; GitHub Actions on a public repository — `origin` = `github.com/Rakibul-cyber/industrial-ai-predictive-maintenance`, confirmed `"visibility": "public"`, empty, default branch `main` via the GitHub REST API on 2026-11-08).
+Target: **local machine only** (developer laptop / reviewer machine). Cloud deployment, Kubernetes, reverse proxies and secrets management are out of scope (00 §6). Cost: **$0**: local compute, a free public dataset download, and GitHub Actions on a public repository (`github.com/Rakibul-cyber/industrial-ai-predictive-maintenance`, visibility confirmed `public` via the GitHub REST API on 2026-11-08).
 
 ## 1. Prerequisites
 
-| Tool | Version verified on dev machine (2026-11-08) |
-|---|---|
-| Python | 3.13 (`python3`; 3.13.3 locally) |
-| pip | 25.3 |
-| Docker Engine / Compose | 29.6.2 / v5.3.1 |
-| git | 2.54.0 |
-| Network | HTTPS to `phm-datasets.s3.amazonaws.com` (data download only) |
+| Tool | Needed for | Version verified on the dev machine (2026-11-08) |
+|---|---|---|
+| Docker Engine + Compose v2 | Option A (Docker) | Docker 29.6.2, Compose v5.3.1, Apple M1 (arm64), 8 CPUs, 4 GB VM memory |
+| Python 3.13 | Option B (local) | 3.13.3 (`python3`); image uses 3.13.18 |
+| git | both | 2.54.0 |
+| curl, python3 on the host | `scripts/smoke_test.sh` | present on macOS and GitHub's ubuntu-24.04 runner |
+| Network | first start only | HTTPS to `phm-datasets.s3.amazonaws.com` (FD001, ~12 MB) |
 
-## 2. Local (non-Docker) run — full sequence
+## 2. Option A — Docker Compose (recommended)
+
+The served model is committed (ADR-030) and baked into the image (ADR-032), so a fresh clone needs **no training**:
+
+```bash
+git clone https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git
+cd industrial-ai-predictive-maintenance
+export APP_UID=$(id -u) APP_GID=$(id -g)   # Linux: dashboard writes ./data as you (harmless on macOS)
+docker compose up -d --build               # builds predmaint:latest; first start downloads FD001 into ./data
+docker compose ps                          # both services "(healthy)"; dashboard waits for a healthy api
+open http://localhost:8501                 # dashboard (Linux: xdg-open); API docs: http://localhost:8000/docs
+docker compose logs -f api dashboard       # troubleshooting
+docker compose down                        # stop and remove containers + network (./data is kept)
+```
+
+One-shot verification (what CI runs; exits non-zero on any failure, always tears down):
+
+```bash
+bash scripts/smoke_test.sh   # build → up → wait healthy → /health → /predict (late example = critical) → dashboard health → down
+```
+
+## 3. Option B — local Python
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt && pip install -e .
 python scripts/download_data.py            # → data/raw/CMAPSSData/ (checksum-verified)
-python scripts/train.py --model baseline   # → models/baseline.*, reports/metrics_baseline.json
-python scripts/train.py --model primary    # → models/primary.*, reports/metrics_primary.json (~80 s on 8 cores)
-python scripts/train.py --select           # → models/model.joblib + model_metadata.json, reports/model_comparison.*
-pytest -q
-python -m predmaint.api.main               # terminal 1: API on $API_HOST:$API_PORT (127.0.0.1:8000)
+pytest -q                                  # incl. 85 % coverage gate
+python -m predmaint.api.main               # terminal 1: API on $API_HOST:$API_PORT (127.0.0.1:8000), committed model
 streamlit run src/predmaint/dashboard/app.py --server.address localhost --server.port 8501  # terminal 2
 ```
 
-Open http://localhost:8501 (dashboard) and http://localhost:8000/docs (API docs).
+## 4. Environment variables
 
-## 3. Environment variables (documented in `.env.example`)
+Defined in `.env.example`. Option B: nothing loads `.env` automatically (no python-dotenv), so export it with `set -a && . ./.env && set +a`. Option A: Docker Compose reads a `.env` file in the project directory **for variable substitution in `docker-compose.yml` only**; container paths and hosts are fixed in the compose file.
 
-Nothing loads `.env` automatically (no python-dotenv; adding it would need an ADR). To use a `.env`, export it into the shell: `cp .env.example .env && set -a && . ./.env && set +a`.
-
-| Variable | Used by | Default | Compose value |
+| Variable | Used by | Local default | In compose |
 |---|---|---|---|
-| `DATA_DIR` | scripts; dashboard (raw FD001 for the explorer/trajectory) | `data` | `/app/data` |
-| `MODEL_DIR` | train script (output dir); API default for `MODEL_PATH` | `models` | `/app/models` |
-| `MODEL_PATH` | API: served model file (metadata `<stem>_metadata.json` beside it) | `$MODEL_DIR/model.joblib` | `/app/models/model.joblib` |
-| `API_HOST` | `python -m predmaint.api.main` | `127.0.0.1` | `0.0.0.0` |
-| `API_PORT` | `python -m predmaint.api.main` | `8000` | `8000` |
-| `LOG_LEVEL` | API (predmaint loggers + uvicorn) | `INFO` | `INFO` |
-| `API_BASE_URL` | dashboard | `http://localhost:8000` | `http://api:8000` |
-| `API_TIMEOUT_SECONDS` | dashboard | `10` | `10` |
+| `DATA_DIR` | scripts; dashboard (raw FD001 for explorer/trajectory) | `data` | `/app/data` (fixed) |
+| `MODEL_DIR` | train script output dir; default base of `MODEL_PATH` | `models` | `/app/models` (image ENV) |
+| `MODEL_PATH` | API: served model file (`<stem>_metadata.json` beside it) | `$MODEL_DIR/model.joblib` | `/app/models/model.joblib` (fixed) |
+| `API_HOST` / `API_PORT` | `python -m predmaint.api.main` | `127.0.0.1` / `8000` | `0.0.0.0` / `8000` (fixed) |
+| `LOG_LEVEL` | API loggers + uvicorn | `INFO` | `${LOG_LEVEL:-INFO}` |
+| `API_BASE_URL` | dashboard | `http://localhost:8000` | `http://api:8000` (fixed) |
+| `API_TIMEOUT_SECONDS` | dashboard, per API call | `10` | `${API_TIMEOUT_SECONDS:-10}` |
+| `APP_UID` / `APP_GID` | compose: user the dashboard runs as (writes `./data`) | — | `${APP_UID:-1000}` / `${APP_GID:-1000}` |
 
 No secrets exist in the MVP. `.env` is gitignored.
 
-## 4. Docker (implemented in M6; ADR-015)
+## 5. Image and compose (ADR-015, ADR-030, ADR-031, ADR-032)
 
-**Image (one `Dockerfile`):** `FROM python:3.13-slim@sha256:<digest pinned in M6>` → non-root user `app` → `WORKDIR /app` → `pip install --no-cache-dir -r requirements.txt` → copy `pyproject.toml` + `src/` → `pip install --no-deps .` → `EXPOSE 8000 8501` → default `CMD ["python", "-m", "predmaint.api.main"]` with `API_HOST=0.0.0.0`. Dev dependencies, data, artifacts, and `.git` are excluded via `.dockerignore`.
+**Image `predmaint:latest`** (one `Dockerfile`, single stage):
 
-**Compose (`docker-compose.yml`):**
+- `FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90`: the multi-arch index digest (amd64 + arm64) of `python:3.13-slim` on 2026-11-08, i.e. Python 3.13.18 on Debian trixie (R9).
+- `pip install --only-binary=:all: -r requirements.txt`: every dependency installs from a wheel, so no compiler is needed and none is present (verified: no `gcc`/`cc`/`make` in the image). A multi-stage build is therefore unnecessary.
+- Copies `src/`, `scripts/`, `examples/`, and the committed `models/model.joblib` + `models/model_metadata.json`. `.dockerignore` excludes `.git`, `.github`, `.venv*`, `data/`, `docs/`, `tests/`, `reports/`, `models/baseline*`, `models/primary*`, caches and `.env`.
+- `PYTHONPATH=/app/src` (no package install step), `HOME=/tmp` (so Streamlit works under any host UID), non-root user `app` (uid/gid 1000), `EXPOSE 8000 8501`, default `CMD ["python", "-m", "predmaint.api.main"]`.
+- **Size (arm64, 2026-11-08):** `docker images` → **1.1 GB** on disk; `docker image inspect --format '{{.Size}}'` → 242,889,009 bytes (layer content size). Unpacked site-packages are 655 MB, led by pyarrow 155 MB (a Streamlit dependency), scipy 117 MB, pandas 83 MB, scikit-learn 57 MB, numpy 40 MB, streamlit 39 MB. Build time 57 s cold, seconds when cached.
 
-| Service | Command | Ports | Volumes | Healthcheck |
-|---|---|---|---|---|
-| `api` | default CMD | `8000:8000` | `./models:/app/models:ro` | `python -c "import json,sys,urllib.request; sys.exit(0 if json.load(urllib.request.urlopen('http://localhost:8000/health'))['model_loaded'] else 1)"` — checks `model_loaded`, because `/health` is 200 even without a model (ADR-028) every 10 s, 5 retries (slim image has no curl) |
-| `dashboard` | `streamlit run src/predmaint/dashboard/app.py --server.port 8501 --server.address 0.0.0.0` | `8501:8501` | `./data:/app/data:ro` | — ; `depends_on: api` with `condition: service_started` so the dashboard can show "API unavailable" itself |
+**Compose (`docker-compose.yml`, project `predmaint`):**
 
-Note: the dashboard command path requires `src/` to be present in the image (it is copied for the package install).
+| Service | Command | Ports (host) | Volumes | Healthcheck | Other |
+|---|---|---|---|---|---|
+| `api` | `python -m predmaint.api.main` | `127.0.0.1:8000` | `./data:/app/data:ro` (not used by the API; lets `docker compose exec api` scripts read FD001) | `python -c` + urllib on `/health`: passes only if `model_loaded` is true (ADR-028), every 10 s, timeout 5 s, 5 retries, start period 20 s | builds the image; `restart: unless-stopped` |
+| `dashboard` | `python scripts/download_data.py` (failure only warns) then `exec streamlit run … --server.address 0.0.0.0 --server.port 8501 --server.headless true` | `127.0.0.1:8501` | `./data:/app/data` (read-write: FD001 downloaded here) | `python -c` + urllib: `/_stcore/health` body must be `ok`, start period 90 s | `depends_on: api: condition: service_healthy`; `user: ${APP_UID:-1000}:${APP_GID:-1000}`; `API_BASE_URL=http://api:8000`; `pull_policy: never`; `restart: unless-stopped` |
 
-**Dataset in the dashboard container (M6 requirement):** the Engine explorer and RUL trajectory sections read raw FD001 from `$DATA_DIR/raw/CMAPSSData`. The `dashboard` service therefore needs the dataset, either mounted read-only (`./data:/app/data:ro` after `python scripts/download_data.py` on the host — the planned option) or downloaded at container start. Without it those two sections show the download hint, while the status bar, Upload and Model info keep working (verified by `tests/test_dashboard_app.py`). Inside compose `--server.address` must be `0.0.0.0`; locally use `localhost` (Streamlit's default listens on all interfaces).
+Ports are published on **127.0.0.1 only**, so nothing is exposed on the LAN by default.
 
-**Commands:**
+## 6. Model artifact and retraining (ADR-030)
 
-```bash
-python scripts/download_data.py && python scripts/train.py --model baseline && python scripts/train.py --model primary && python scripts/train.py --select   # artifacts must exist on host first
-docker compose up -d --build
-docker compose ps                     # api should be "healthy"
-curl -s localhost:8000/health
-docker compose logs -f api            # troubleshooting
-docker compose down
-```
+- `models/model.joblib` (451,385 bytes, SHA-256 `39bfa6fd4a168b263acac4ccefa0be81a4fc838afa7eb14bf7306ad1099128c1`) and `models/model_metadata.json` are **committed together** and baked into the image. Candidate files (`baseline*`, `primary*`) stay ignored.
+- Pickle safety net: scikit-learn is pinned exactly (1.9.1); `/model/info` reports `sklearn_version_match`; `tests/test_model_artifact.py` fails if the installed scikit-learn differs from the metadata's version, and checks that the committed model reproduces `examples/expected_predictions.json`. `tests/test_real_data.py` (with the dataset) checks that it reproduces the official-test RMSE in its metadata.
+- **Retraining procedure:**
 
-## 5. Artifact availability
+  ```bash
+  python scripts/download_data.py
+  python scripts/train.py --model baseline
+  python scripts/train.py --model primary
+  python scripts/train.py --select          # writes models/model.joblib + models/model_metadata.json
+  pytest -q                                 # artifact + real-data checks
+  git add models/model.joblib models/model_metadata.json reports/   # commit the two model files TOGETHER
+  docker compose up -d --build              # rebuild: the model is baked into the image
+  ```
 
-- Artifacts are produced on the host by `scripts/train.py` and mounted read-only into `api`. They are not baked into the image, so retraining never requires a rebuild and the image contains no data-derived content.
-- **Demo reproducibility (ADR-022):** after `python scripts/download_data.py`, one documented train command (`python scripts/train.py`) followed by `docker compose up` is the complete path to a running demo.
-- If `models/` is empty: `api` starts; `/health` returns 200 with `model_loaded: false` (ADR-028); `/predict` and `/model/info` return HTTP 503 with the standard error body (`MODEL_UNAVAILABLE`, ADR-022); the container stays `unhealthy` and logs state the missing path. Fix: run `scripts/train.py`, then `docker compose restart api`.
-- `model_metadata.json` is committed in M7 so the reported metrics are reviewable. Whether `model.joblib` is small enough to commit (removing the train step from the demo path) is decided in M6 (task M6-T4) with its measured size; until then it is not committed (regenerable).
+- If the model cannot be loaded (e.g. `MODEL_PATH` overridden to a missing file), the API still starts: `/health` returns 200 with `model_loaded: false`, `/predict` and `/model/info` return 503, and the compose healthcheck keeps `api` **unhealthy**, so the dashboard's `service_healthy` dependency is not satisfied (compose behaviour; this failure path was not exercised in M6).
 
-## 6. Health checks
+## 7. Dataset in containers (ADR-031)
 
-- `GET /health` = liveness (always 200) + readiness (`model_loaded`). The compose healthcheck and the dashboard status indicator read `model_loaded`.
-- Dashboard: HTTP 200 on `/` (verified via `curl -sI localhost:8501`).
+- `./data` is bind-mounted into both services: read-write for the dashboard, read-only for the API. On every dashboard start, `scripts/download_data.py` runs. If FD001 is present with matching SHA-256 it prints "Dataset already present and checksums match; nothing downloaded" and the container is offline-capable. Otherwise it downloads the 12 MB archive from the verified NASA URL, checks all checksums and extracts. Verified in M6: first start downloaded; restart skipped.
+- If the download fails (offline first start), the dashboard still starts; the explorer and trajectory show the download hint, and status, Upload and Model info keep working.
+- Linux: the dashboard runs as `APP_UID:APP_GID` so it can write into the host-owned `./data`. Export them (Quickstart) — the default 1000:1000 only works if that is your UID. macOS Docker Desktop maps ownership, so the default works there.
 
-## 7. Supported architectures
+## 8. Health checks
 
-Linux cp313 wheels for every runtime dependency were confirmed for **x86_64 and aarch64** (03). The image is built and smoke-tested natively on the dev machine (arm64) in M6; an amd64 build is **UNVERIFIED** (R10) and not required for the MVP.
+- `GET /health` = liveness (always 200) + readiness (`model_loaded`). The compose healthcheck and the dashboard status bar read `model_loaded`.
+- Dashboard: `GET /_stcore/health` → `ok`.
+- `docker compose ps` shows `(healthy)` for both when the stack is ready; the smoke test waits for exactly that (timeout 240 s, `SMOKE_TIMEOUT_S`).
+
+## 9. Supported architectures
+
+- **arm64:** built, run and smoke-tested on the dev machine (Apple M1) on 2026-11-08: `SMOKE TEST PASSED (arm64)`, exit 0.
+- **amd64:** the CI `docker` job builds and smoke-tests the image on GitHub's `ubuntu-24.04` (x86_64) runner on every push; its first result is recorded in 14 after the user's push. Wheels for x86_64 were confirmed in M0 (03).
+
+## 10. Known limits
+
+- Image size 1.1 GB on disk, dominated by scientific/Streamlit wheels; one image serves both roles (ADR-032), so the API image carries Streamlit/pyarrow.
+- The dashboard's first start needs network access; the API never does.
+- Retraining requires a rebuild (model baked in) and a commit of both model files.
+- Ports 8000/8501 must be free; the smoke test uses its own compose project (`predmaint-smoke`) but the same ports, so stop a running stack first.
+- No TLS, auth, CORS, rate limiting or multi-worker serving: local demo only (ADR-012).

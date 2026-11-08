@@ -13,7 +13,7 @@ Portfolio-grade, end-to-end ML system: RUL regression on NASA C-MAPSS **FD001**,
 - Artifacts: `models/model.joblib` + `models/model_metadata.json`.
 - API: `GET /health`, `POST /predict`, `GET /model/info`, error envelope `{"error": {code, message, details}}`.
 - Dashboard calls the API over HTTP (`API_BASE_URL`), never imports `predmaint.models`.
-- One Docker image, compose services `api` (8000) and `dashboard` (8501); models mounted read-only.
+- One Docker image, compose services `api` (8000) and `dashboard` (8501); served model committed and baked into the image (ADR-030/032); `./data` bind-mounted, FD001 downloaded by the dashboard on first start (ADR-031).
 - ADR status: architecture frozen 2026-11-08 — ADR-001…022 *Accepted* (docs/13). Changes only via docs/15.
 
 ## Source of truth and session-start reading order

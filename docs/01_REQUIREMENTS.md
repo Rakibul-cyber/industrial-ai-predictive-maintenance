@@ -22,7 +22,7 @@ Each requirement has a measurable acceptance criterion and traces to the milesto
 | FR-014 | Dashboard shows model information. | Dashboard renders model version, type, and test metrics fetched from `GET /model/info`. | M5 |
 | FR-015 | Dashboard requests and displays predictions. | User selects an FD001 test unit (from `DATA_DIR`) or uploads a file in the raw FD format; dashboard sends the history to `POST /predict` and shows predicted RUL, health band, and sensor trend charts. No prediction is computed or stored in the dashboard. | M5 |
 | FR-016 | Dashboard handles API failure. | With the API stopped, the dashboard shows an error message naming `API_BASE_URL` and does not crash; API 4xx error messages are shown verbatim. | M5 |
-| FR-017 | Containerised deployment. | `docker compose up --build` starts `api` (port 8000) and `dashboard` (port 8501); `api` healthcheck reports healthy when the model is mounted; smoke test passes. | M6 |
+| FR-017 | Containerised deployment. | `docker compose up --build` starts `api` (port 8000) and `dashboard` (port 8501); `api` healthcheck reports healthy only when `model_loaded` is true (ADR-028); the dashboard waits for a healthy `api`; `scripts/smoke_test.sh` passes locally (arm64) and in the CI `docker` job (amd64). | M6 |
 
 ## Non-functional requirements
 

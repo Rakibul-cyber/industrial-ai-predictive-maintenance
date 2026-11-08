@@ -18,7 +18,7 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-012 | Backend: FastAPI + Pydantic v2 + uvicorn | Accepted (2026-11-08) |
 | ADR-013 | httpx2 instead of httpx for TestClient | Accepted (2026-11-08) |
 | ADR-014 | Frontend: Streamlit + requests over HTTP | Accepted (2026-11-08) |
-| ADR-015 | Packaging: one image, two compose services, mounted artifacts | Accepted (2026-11-08) |
+| ADR-015 | Packaging: one image, two compose services, mounted artifacts | Accepted (2026-11-08); artifact mount superseded by ADR-030/032 |
 | ADR-016 | Tooling: ruff, exact pins, pytest, CI from M1 | Accepted (2026-11-08) |
 | ADR-017 | Health band thresholds | Superseded by ADR-025 |
 | ADR-018 | Clamp predictions at 0 | Superseded by ADR-027 |
@@ -33,6 +33,9 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-027 | Clamp predictions to [0, RUL_CAP] | Accepted (2026-11-08, user-directed) |
 | ADR-028 | `/health` always 200; readiness via `model_loaded` (amends ADR-022) | Accepted (2026-11-08, user-directed) |
 | ADR-029 | Commit one FD001 test engine as demo payloads (exception to ADR-003 policy) | Accepted (2026-11-08, user-directed) |
+| ADR-030 | Commit the served model artifact | Accepted (2026-11-08, user-directed) |
+| ADR-031 | Dataset in containers: `./data` bind mount, dashboard downloads on first start | Accepted (2026-11-08, user-directed) |
+| ADR-032 | One image (single stage, digest-pinned, model baked in), two compose services | Accepted (2026-11-08, user-directed) |
 
 ---
 
@@ -246,3 +249,28 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Alternatives:** synthetic demo payloads (not "real"); generate at runtime from the downloaded data (demo unusable without the dataset).
 - **Rationale:** a small, attributed excerpt makes the demo checkable without downloading the dataset.
 - **Consequences:** R1 (licence) now also covers this excerpt; if NASA terms ever forbid redistribution, remove `examples/*.json` and regenerate locally with `scripts/make_request_payload.py`.
+
+### ADR-030 — Commit the served model artifact (decides M6-T4)
+
+- **Context:** M6 authorization (2026-11-08). The served `models/model.joblib` is 451,385 bytes; `model_metadata.json` was already committed in `65db98d`. ADR-022 wanted demo reproducibility = one train command + `docker compose up`.
+- **Decision:** commit `models/model.joblib` together with `models/model_metadata.json` (`.gitignore` exception `!models/model.joblib`), so a fresh clone runs `docker compose up` with no training step. Candidate files (`baseline*`, `primary*`) stay ignored. Retraining = the train/select commands, then commit both files together (10 §6).
+- **Evidence:** before committing, `model_metadata.json` was confirmed to be the committed version, its `candidate_model_version` (`hgb-20261108T150441Z`) to equal the local primary candidate, and `model.joblib` to be a byte copy of `primary.joblib` (SHA-256 `39bfa6fd…28c1`).
+- **Mitigations (pickle risk R6/R15):** scikit-learn pinned exactly (1.9.1); `/model/info.sklearn_version_match`; `tests/test_model_artifact.py` fails if the installed scikit-learn ≠ metadata version and checks that the committed model reproduces `examples/expected_predictions.json` (both run in CI without data); `tests/test_real_data.py` checks the official-test RMSE when the dataset is present.
+- **Alternatives:** train inside the image build or at container start (slower, needs the dataset in the API); Git LFS (unnecessary at 451 KB).
+- **Consequences:** binary changes appear in git history; reviewers must treat model-file diffs like code (R15).
+
+### ADR-031 — Dataset in containers
+
+- **Context:** the dashboard's explorer and trajectory read raw FD001 (M5); NASA data is not committed beyond the ADR-029 excerpt; the API does not need the dataset.
+- **Decision:** `./data` is bind-mounted into both services (dashboard read-write, API read-only). The dashboard's compose command runs `scripts/download_data.py` (idempotent, SHA-256-verified, verified S3 URL) before `streamlit run`; a download failure only logs a warning. On Linux the dashboard runs as `APP_UID:APP_GID` so it can write the host-owned mount.
+- **Evidence (M6, arm64):** first start → "Downloaded, verified and extracted the archive."; restart → "Dataset already present and checksums match; nothing downloaded."; host-side checksums equal 04 §3.
+- **Alternatives:** named volume (no host reuse); download at image build (puts NASA data in the image); require a manual host download (not self-contained).
+- **Consequences:** first start needs network; later starts are offline-capable; a host that already ran Option B reuses its `./data`.
+
+### ADR-032 — One image, two compose services; model baked in (supersedes ADR-015's artifact mount)
+
+- **Context:** ADR-015 planned one image + two services with `./models` mounted read-only. With the model committed (ADR-030), the image can carry it, so it runs anywhere without a mount.
+- **Decision:** one `Dockerfile`, single stage, `FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90`; `pip install --only-binary=:all:` (verified: all wheels available; no compiler in the final image, so no multi-stage build needed); non-root `app` (1000); `src/`, `scripts/`, `examples/` and the two committed model files copied in; no `./models` mount. Compose services `api` (default CMD) and `dashboard` (Streamlit command) share `predmaint:latest`; healthchecks via `python -c` + urllib (`model_loaded` must be true for `api`; `/_stcore/health` for `dashboard`); `dashboard` `depends_on: api: service_healthy`; ports bound to 127.0.0.1; `restart: unless-stopped`.
+- **Evidence:** image 1.1 GB on disk (`docker images`), 242,889,009 bytes content size; build 57 s cold on arm64.
+- **Alternatives:** two slim images (smaller API image, two builds); keep the `./models` mount (retrain without rebuild, but the image is not self-contained).
+- **Consequences:** retraining requires `docker compose up --build`; the API image carries Streamlit/pyarrow (size).

@@ -1,0 +1,71 @@
+# Local deployment: one image, two services (ADR-032). See docs/10_DEPLOYMENT_PLAN.md §4.
+#   docker compose up -d --build      # first start downloads FD001 (~12 MB) into ./data
+#   docker compose ps                 # both services should become "healthy"
+#   docker compose down
+# Ports are published on 127.0.0.1 only. Variables below can be set in the shell or in .env.
+name: predmaint
+
+x-app: &app
+  image: predmaint:latest
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *app
+    build: .
+    command: ["python", "-m", "predmaint.api.main"]
+    environment:
+      MODEL_PATH: /app/models/model.joblib # served model baked into the image (ADR-030/032)
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data:/app/data:ro # not needed by the API itself; lets `docker compose exec api` scripts read FD001
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      # Readiness, not just liveness: /health is 200 even without a model (ADR-028).
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,sys,urllib.request; sys.exit(0 if json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3))['model_loaded'] else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  dashboard:
+    <<: *app
+    pull_policy: never # built by the api service
+    depends_on:
+      api:
+        condition: service_healthy
+    # Write access to the ./data bind mount: run as the host user on Linux (export APP_UID/APP_GID).
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    command:
+      - sh
+      - -c
+      - >-
+        python scripts/download_data.py
+        || echo "WARNING: FD001 download failed; explorer and trajectory stay disabled until it succeeds";
+        exec streamlit run src/predmaint/dashboard/app.py
+        --server.address 0.0.0.0 --server.port 8501 --server.headless true
+    environment:
+      DATA_DIR: /app/data
+      API_BASE_URL: http://api:8000
+      API_TIMEOUT_SECONDS: ${API_TIMEOUT_SECONDS:-10}
+    volumes:
+      - ./data:/app/data # FD001 is downloaded here on first start (ADR-031), reused afterwards
+    ports:
+      - "127.0.0.1:8501:8501"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3).read() == b'ok' else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s

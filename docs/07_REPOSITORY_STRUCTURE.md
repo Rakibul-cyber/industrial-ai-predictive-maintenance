@@ -11,9 +11,9 @@ industrial-ai-predictive-maintenance/
 ├── requirements-dev.txt           # -r requirements.txt + pinned test/lint deps
 ├── .env.example                   # Documented env vars (10 §3)
 ├── .gitignore
-├── .dockerignore                  # Keeps data/, models/*.joblib, .venv*, .git out of the image (M6)
-├── Dockerfile                     # Single image for api + dashboard (M6)
-├── docker-compose.yml             # Services: api (8000), dashboard (8501) (M6)
+├── .dockerignore                  # Keeps .git, data/, docs/, tests/, reports/, candidate models out of the build (M6)
+├── Dockerfile                     # Single-stage image for api + dashboard; base pinned by digest; model baked in (M6)
+├── docker-compose.yml             # Services: api (8000), dashboard (8501), healthchecks, ./data bind mount (M6)
 ├── .github/workflows/ci.yml       # ruff + pytest on push/PR (M1)
 ├── src/predmaint/
 │   ├── __init__.py                # Package version
@@ -44,7 +44,8 @@ industrial-ai-predictive-maintenance/
 ├── scripts/                       # Thin CLI entrypoints only
 │   ├── download_data.py           #   → predmaint.data.download
 │   ├── train.py                   #   → predmaint.models.train
-│   └── make_request_payload.py    #   → builds a /predict body from test_FD001
+│   ├── make_request_payload.py    #   → builds a /predict body from test_FD001
+│   └── smoke_test.sh              #   Docker smoke test: build, up, health, /predict, teardown (M6; CI docker job)
 ├── tests/                         # pytest suite (09)
 │   ├── conftest.py                #   synthetic C-MAPSS-like fixtures, tiny trained model fixture
 │   ├── test_download.py           #   M1
@@ -61,7 +62,8 @@ industrial-ai-predictive-maintenance/
 │   ├── test_dashboard_client.py   #   M5: api_client + import boundary
 │   ├── test_dashboard_helpers.py  #   M5: true RUL, payloads, trajectory
 │   ├── test_dashboard_app.py      #   M5: streamlit AppTest smoke tests (API mocked)
-│   └── test_docker_smoke.py       #   M6 (marker: docker)
+│   ├── test_model_artifact.py     #   M6: committed model present, sklearn pinned, reproduces sidecar
+│   └── test_docker_smoke.py       #   M6 (marker: docker): runs scripts/smoke_test.sh
 ├── data/                          # gitignored except .gitkeep
 │   ├── .gitkeep
 │   ├── raw/                       #   downloaded archive + extracted CMAPSSData/
@@ -71,8 +73,8 @@ industrial-ai-predictive-maintenance/
 │   ├── baseline.joblib            #   per-candidate artifact (M2), gitignored
 │   ├── baseline_metadata.json     #   per-candidate metadata, gitignored (reports/ holds the committed record)
 │   ├── primary.joblib             #   per-candidate artifact (M3), gitignored (+ primary_metadata.json)
-│   ├── model.joblib               #   served (selected) model (M3), gitignored
-│   └── model_metadata.json        #   committed with reported results (M7)
+│   ├── model.joblib               #   served (selected) model — committed (ADR-030)
+│   └── model_metadata.json        #   served model metadata — committed with it
 ├── examples/                      # committed demo payloads (ADR-029: FD001 test engines 1 and 34)
 │   ├── predict_request.json       #   all 31 cycles
 │   ├── predict_request_min.json   #   last 30 cycles (= WINDOW_SIZE)

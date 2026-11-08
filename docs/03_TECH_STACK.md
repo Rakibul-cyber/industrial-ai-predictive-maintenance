@@ -7,7 +7,7 @@ All versions below were **confirmed on 2026-11-08** in a throwaway venv (`.venv-
 | Item | Choice | Evidence |
 |---|---|---|
 | Python | **3.13** (local 3.13.3) | `python3 --version` → `Python 3.13.3`. `python` is not on PATH; always use `python3` / venv `python`. |
-| Docker base image | `python:3.13-slim` | `docker run python:3.13-slim` → Python 3.13.18, Debian 13.7, glibc 2.41 (≥ 2.28 required by pandas/numpy/sklearn wheels). Tag is mutable — digest pinned in M6 (R9). |
+| Docker base image | `python:3.13-slim` | `docker run python:3.13-slim` → Python 3.13.18, Debian 13.7, glibc 2.41 (≥ 2.28 required by pandas/numpy/sklearn wheels). Pinned in the Dockerfile by multi-arch index digest `sha256:e48f59cd…ed90` (M6, R9). |
 | Container runtime | Docker 29.6.2, Compose v5.3.1 | `docker --version`, `docker compose version`; daemon reachable (`linux/aarch64`). |
 | OS (dev) | macOS 27.0.1, arm64 | `sw_vers`, `uname -m`. |
 
@@ -28,7 +28,7 @@ All versions below were **confirmed on 2026-11-08** in a throwaway venv (`.venv-
 | Coverage | pytest-cov | `7.1.0` | NFR-005 measurement. |
 | API test transport | **httpx2** | `2.16.0` | See ADR-013: with starlette 1.10.0, `fastapi.testclient` + `httpx` emits `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead.` With httpx2 installed, TestClient imported `httpx2` (not `httpx`) and a `/health` call returned 200 under `-W error`. |
 | Lint + format | ruff | `0.17.4` | One tool for both (ADR-016). |
-| CI | GitHub Actions | `actions/setup-python` with `python-version: "3.13"` | **UNVERIFIED** that the hosted runner resolves 3.13 — verified on the first CI run in M1. |
+| CI | GitHub Actions | `actions/setup-python` with `python-version: "3.13"` | Verified: hosted runner resolves 3.13 (first run, M1). Since M3: `actions/checkout@v7`, `actions/setup-python@v7`, `ubuntu-24.04`. M6 adds a `docker` job (smoke test on amd64). |
 
 ## 3. Requirements files (created in M1)
 

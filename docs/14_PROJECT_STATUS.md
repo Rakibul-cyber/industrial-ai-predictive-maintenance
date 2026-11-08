@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **M5 — Streamlit dashboard: complete, awaiting review** |
+| Current milestone | **M6 — Docker, test finalisation, CI docker job: complete locally (arm64), awaiting review; amd64 pending the CI run** |
 | Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `7d7de29` "feat(api): Implement FastAPI-based predictive maintenance API" (M4, committed and pushed by the user; CI run 42505948636 green, 0 annotations), on top of `65db98d` (M3), `f4c86df` (M2), `4e8c04c` (M1), `71295ba` (M0). Working tree clean at the start of M5; M5 work is **uncommitted** for review. Remote `origin` = `https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git` (public). |
-| Next approved action | **Await user review of M5** and authorization for Milestone 6 (and, separately, any commit/push of M5). |
+| Git ref | `main` = `origin/main` @ `6b4da81` "Add Streamlit dashboard for RUL API with API client and helpers" (M5, committed and pushed by the user; CI run 42506959482 green), on top of `7d7de29` (M4), `65db98d` (M3), `f4c86df` (M2), `4e8c04c` (M1), `71295ba` (M0). Working tree clean at the start of M6; M6 work is **uncommitted** for review (the user commits and pushes so CI runs the new `docker` job). |
+| Next approved action | **Await user review of M6**, the user's commit + push, and the first CI `docker` job result (amd64); then authorization for Milestone 7. |
 
 ## Milestone tracker
 
@@ -16,8 +16,8 @@
 | M2 Labels, features, baseline (re-scoped, CR-002) | **Accepted** 2026-11-08; committed `f4c86df`, pushed; CI green | M2 section below |
 | M3 Primary model, selection, inference contract (CR-003) | **Accepted** 2026-11-08; committed `65db98d`, pushed; CI green (v7 actions, ubuntu-24.04) | M3 section below |
 | M4 API (CR-004) | **Accepted** 2026-11-08; committed `7d7de29`, pushed; CI green | M4 section below |
-| M5 Dashboard (CR-005) | **Complete** 2026-11-08 (uncommitted, awaiting review) | M5 section below |
-| M6 Docker | Not started | — |
+| M5 Dashboard (CR-005) | **Accepted** 2026-11-08; committed `6b4da81`, pushed; CI green | M5 section below |
+| M6 Docker, tests, CI (ADR-030–032) | **Complete locally** 2026-11-08 (uncommitted); amd64 via CI pending | M6 section below |
 | M7 Finalisation | Not started | — |
 
 ## M0 — what was verified (actual command results)
@@ -53,8 +53,8 @@
 | U3 | Near-constant sensor list — **resolved in M2**: ≤ 2-unique rule verified on real data (04 §5a) | Closed | 04 §5a, 12 R12 |
 | U4 | NASA score official implementation — **UNVERIFIED** (interpretation fixed by ADR-009) | Open | 12 R5 |
 | U5 | GitHub Actions runner resolves Python 3.13 — **resolved**: run 42491244396 on `4e8c04c` succeeded, `actions/setup-python@v5` step with `python-version: "3.13"` passed. Exact patch version not visible (logs need auth). | Closed | CI section, 12 R11 |
-| U6 | Dockerfile/compose behaviour (not writable in M0) — **UNVERIFIED** | Open | 08 M6, 12 R8 |
-| U7 | amd64 image build — **UNVERIFIED** (wheels confirmed) | Open | 12 R10 |
+| U6 | Dockerfile/compose behaviour — **resolved in M6** on arm64 (build, healthy services, smoke test) | Closed | 08 M6, 12 R8 |
+| U7 | amd64 image build — **UNVERIFIED until the first CI `docker` job** after the user's push (wheels confirmed) | Open (pending push) | 12 R10 |
 | U8 | Column → physical sensor name mapping — **UNVERIFIED**, not used (ADR-020) | Accepted limitation | 12 R2 |
 
 ## M1 — results (2026-11-08, actual command output, trimmed)
@@ -277,6 +277,67 @@ Both servers stopped afterwards (health checks on :8000 and :8501 fail).
 - In AppTest, `st.badge` is not exposed as a typed element, so badge text was not read back; status values come from the API responses (trajectory table and sidecar).
 - **M6 note:** the dashboard container needs FD001 under `$DATA_DIR/raw/CMAPSSData` (planned: read-only mount of `./data`) for the explorer and trajectory; status, Upload and Model info work without it (10 §4).
 
+## CI — after the M5 push (2026-11-08)
+
+Run [42506959482](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/runs/42506959482) on `6b4da81`: **success** (lint-test job on `ubuntu-24.04`).
+
+## M6 — results (2026-11-08, actual command output, trimmed; dev machine Apple M1, arm64)
+
+**Decisions:** ADR-030 (commit the served model; decides M6-T4), ADR-031 (`./data` bind mount; the dashboard downloads FD001 on first start), ADR-032 (one single-stage image, digest-pinned, model baked in, two compose services; supersedes ADR-015's `./models` mount). Before committing, the local `model.joblib` was confirmed to be the artifact described by the already-committed `model_metadata.json` (candidate `hgb-20261108T150441Z`, byte copy of `primary.joblib`, SHA-256 `39bfa6fd…28c1`). No new Python dependency.
+
+**Files created:** `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `scripts/smoke_test.sh`, `tests/test_model_artifact.py`, `tests/test_docker_smoke.py`. **Committed artifact (newly tracked):** `models/model.joblib`. **Modified:** `.gitignore`, `pyproject.toml`, `.github/workflows/ci.yml`, `.env.example`, README, CLAUDE.md, docs 01, 02, 03, 07, 08, 09, 10, 11, 12, 13, 14.
+
+```text
+$ ruff check .            → All checks passed!
+$ ruff format --check .   → 64 files already formatted
+$ pytest -q               → Required test coverage of 85% reached. Total coverage: 94.98%
+                            187 passed, 2 skipped (network, docker) in 11.14s
+$ pytest -q -m data --no-cov → 11 passed  ·  CI-equivalent (no data/model dirs) → 176 passed, 13 skipped, gate reached
+$ docker build -t predmaint:latest .   → exit 0, 57 s cold (pip --only-binary=:all:; no compiler in image)
+$ docker images predmaint → predmaint latest 736171c7b08a 1.1GB   (inspect .Size 242,889,009 bytes; arm64; user app)
+$ mv data/raw → scratchpad backup (to show a first-start download); docker compose up -d
+ Container predmaint-api-1 Healthy · Container predmaint-dashboard-1 Started
+$ docker compose ps
+SERVICE     STATUS                    PORTS
+api         Up 12 seconds (healthy)   127.0.0.1:8000->8000/tcp
+dashboard   Up 6 seconds (healthy)    127.0.0.1:8501->8501/tcp
+$ docker compose logs dashboard   (first start)
+Downloaded, verified and extracted the archive.
+  verified /app/data/raw/CMAPSSData/train_FD001.txt (+ test_FD001.txt, RUL_FD001.txt)
+host: data/raw/cmapss_outer.zip 12429152 bytes; train_FD001.txt SHA-256 963b5e22…de0f8 (== 04 §3)
+$ curl -s -X POST localhost:8000/predict -d @examples/predict_request.json
+{"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":31,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[]}
+$ curl -s -X POST localhost:8000/predict -d @examples/predict_request_late.json
+{"unit_id":"test-unit-34","predicted_rul":6.3,"health_status":"critical","cycles_received":203,"cycles_used":30,"last_cycle":203,"model_version":"primary-20261108-f4c86df","warnings":[]}
+sidecar comparison: predict_request / _min / _late → MATCH, MATCH, MATCH
+$ docker compose restart dashboard → logs: "Dataset already present and checksums match; nothing downloaded."
+$ docker compose exec dashboard … ApiClient('http://api:8000').health() → 200 {... "model_loaded": True ...}; id → uid=1000(app)
+$ docker compose down → containers + network removed
+(new download's FD001 checksums == backup; backup deleted)
+$ bash scripts/smoke_test.sh; echo $?
+   api=healthy dashboard=starting … api=healthy dashboard=healthy
+== GET /health → {"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.1.0"}
+== POST /predict examples/predict_request_late.json → {"unit_id":"test-unit-34","predicted_rul":6.3,"health_status":"critical",…}
+== GET dashboard /_stcore/health → ok
+SMOKE TEST PASSED (arm64)
+exit code: 0   (leftover containers: 0)
+$ SMOKE_TIMEOUT_S=1 bash scripts/smoke_test.sh → "SMOKE TEST FAILED: timed out waiting for healthy services", exit code 1, leftover containers 0
+$ RUN_DOCKER_TESTS=1 pytest -q -m docker --no-cov → 1 passed in 16.90s
+$ docker run -e MODEL_PATH=/nonexistent/model.joblib … (AC-21 in a container)
+  /health → {"status":"degraded","model_loaded":false,…} HTTP 200 · /predict → MODEL_UNAVAILABLE HTTP 503 · /model/info → HTTP 503
+  compose healthcheck command → exit 1 (container would be unhealthy, as intended)
+$ pip check → No broken requirements found.   $ git ls-files data/ → data/.gitkeep
+```
+
+**Findings:**
+
+- **arm64: verified** end to end (build, healthy compose, containerised predictions, first-start download/skip, smoke test pass and fail paths). **amd64: not yet verified.** It is confirmed only by the CI `docker` job after the user's push; record the run URL and result here then. Whether the GitHub runner provides `docker compose` v2 is UNVERIFIED until that run.
+- A first AC-21 attempt showed `HTTP 000`. This was my polling, not the app: Docker's port proxy accepted the TCP connection before uvicorn was listening, so curl got an empty reply and `--retry-connrefused` did not retry. Rerun with a proper wait loop: ready after ~3 s, behaviour as specified.
+- Linux bind-mount permissions are handled by running the dashboard as `APP_UID:APP_GID` (the smoke test exports the host IDs) with `HOME=/tmp`. This was exercised on macOS only; the CI Linux job is the first real test of it.
+- Coverage gate set at 85 % (stricter than NFR-005's 80 % floor); subsets need `--no-cov`.
+- README now has the real CI badge (verified: badge URL → HTTP 200 `image/svg+xml`, title "CI - passing") and Quickstart Option A (Docker) / Option B (local Python). A stale README sentence ("data is not redistributed") was corrected to mention the ADR-029 excerpt.
+- 11: 16 criteria met, 3 partly met (AC-11 screenshot, AC-12 CI with the docker job, AC-22 fresh-clone run), 3 open for M7 (AC-04 README results table, AC-17 docs-match-code, AC-18 final defect review).
+
 ## Measured results
 
 | Item | Value | Source |
@@ -294,3 +355,6 @@ Both servers stopped afterwards (health checks on :8000 and :8501 fail).
 | Coverage `src/predmaint` (after M4) | 94 % (971 stmts, 55 missed) | `pytest -q --cov=predmaint` |
 | Late-life example (test 34, 203 cycles) | predicted 6.3 vs true 7 (`critical`) | sidecar + M5 dashboard session |
 | Coverage `src/predmaint` (after M5) | 95 % (1,095 stmts, 55 missed; `dashboard/app.py` omitted) | `pytest -q --cov=predmaint` |
+| Docker image (arm64) | 1.1 GB on disk (`docker images`); 242,889,009 bytes content size; build 57 s cold | M6 |
+| Smoke test (arm64) | PASSED, exit 0; forced failure exit 1 | M6 |
+| Coverage (after M6) | 94.98 % (gate 85 %) | `pytest -q` |
