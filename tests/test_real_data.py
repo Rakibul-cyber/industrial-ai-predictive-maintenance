@@ -76,7 +76,7 @@ def test_api_reproduces_committed_example(example: str) -> None:
     with TestClient(create_app(model_path=model_path)) as client:
         body = client.post("/predict", json=payload).json()
     keys = ("unit_id", "cycles_received", "last_cycle", "predicted_rul", "health_status")
-    for key in (*keys, "rul_lower", "rul_upper", "interval_level"):
+    for key in (*keys, "rul_lower", "rul_upper", "interval_level", "interval_calibrated"):
         assert body[key] == expected[key], key
     with TestClient(create_app(model_path=model_path)) as client:
         scored = client.post("/anomaly", json=payload).json()
@@ -159,3 +159,73 @@ def test_committed_anomaly_reproduces_recorded_evaluation(
     assert fresh["threshold"] == committed["threshold"]
     assert fresh["for_model_version"] == committed["for_model_version"]
     assert json.loads(json.dumps(fresh["evaluation"])) == committed["evaluation"]
+
+
+def test_committed_calibration_reproduces_test_coverage(real_cmapss_dir: Path) -> None:
+    """Q_final from the committed metadata applied to the committed quantile models reproduces
+    the recorded calibrated test coverage (ADR-037)."""
+    from predmaint.features.build import build_features, last_rows
+    from predmaint.models.intervals import summarize_intervals
+    from predmaint.models.predict import (
+        interval_path_for,
+        load_interval_model,
+        order_bounds,
+        predict_from_features,
+    )
+
+    model_path = get_settings().model_path
+    if not interval_path_for(model_path).is_file():
+        pytest.skip("no interval artifact (run scripts/train.py --model intervals)")
+    clear_model_cache()
+    model, intervals = load_model(model_path), load_interval_model(interval_path_for(model_path))
+    if not intervals.calibrated:
+        pytest.skip("interval metadata is not calibrated")
+    data = load_fd001(real_cmapss_dir)
+    last = last_rows(build_features(data.test, model.required_sensors, model.window_size))
+    point = predict_from_features(model.pipeline, last, model.rul_cap)
+    lo, hi, n = order_bounds(
+        point, intervals.lower.predict(last), intervals.upper.predict(last), 125,
+        intervals.conformal_q,
+    )  # fmt: skip
+    summary = summarize_intervals(data.rul["rul"].to_numpy(dtype=float), lo, hi, 125, n)
+    assert summary == intervals.metadata["calibration"]["test"]["after"]
+
+
+def test_committed_calibration_reproduces_from_oof(real_cmapss_dir: Path, tmp_path: Path) -> None:
+    """Re-running the interval step (OOF predictions + CQR) reproduces every recorded
+    calibration number and the quantile models' predictions (~20 s). Byte identity of the
+    pickle is checked with SHA-256 from a fresh process (14); inside a long pytest process the
+    pickle bytes were observed to differ while the calibration numbers matched (cause not
+    investigated)."""
+    import json
+    import shutil
+
+    import joblib
+    import numpy as np
+
+    from predmaint.features.build import build_features
+    from predmaint.models.intervals import run_interval_training
+    from predmaint.models.predict import interval_path_for
+
+    model_path = get_settings().model_path
+    committed_path = interval_path_for(model_path)
+    if not committed_path.is_file():
+        pytest.skip("no interval artifact (run scripts/train.py --model intervals)")
+    committed = json.loads(committed_path.with_name("model_intervals_metadata.json").read_text())
+    if "calibration" not in committed:
+        pytest.skip("interval metadata is not calibrated")
+    models = tmp_path / "models"
+    models.mkdir()
+    for name in ("model.joblib", "model_metadata.json"):
+        shutil.copyfile(model_path.parent / name, models / name)
+    clear_model_cache()
+    fresh = run_interval_training(real_cmapss_dir, models, tmp_path / "r", echo=lambda _m: None)
+    assert json.loads(json.dumps(fresh["calibration"])) == committed["calibration"]
+    assert fresh["conformal_q"] == committed["conformal_q"]
+    old, new = joblib.load(committed_path), joblib.load(models / "model_intervals.joblib")
+    meta = json.loads((model_path.parent / "model_metadata.json").read_text())
+    rows = build_features(
+        load_fd001(real_cmapss_dir).test, meta["required_sensors"], meta["config"]["window_size"]
+    )
+    for name in ("lower", "upper"):
+        assert np.array_equal(old[name].predict(rows), new[name].predict(rows)), name

@@ -169,6 +169,37 @@ def test_app_renders_interval_fields(data_dir: Path, monkeypatch: pytest.MonkeyP
     assert len(at.table) >= 3  # model card, intervals, metrics
 
 
+def test_app_band_caption_names_conformal_q(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    coverage = {
+        "n": 4,
+        "coverage_unclipped": 0.7,
+        "coverage_clipped": 0.8,
+        "mean_width": 40.0,
+        "median_width": 40.0,
+        "n_reordered": 0,
+    }
+    info = {**INFO, "intervals": {"for_model_version": "test-v1", "method": "quantile HGB",
+                                  "quantiles": [0.1, 0.9], "interval_level": 0.8,
+                                  "trained_at": "2026-11-08T20:37:53Z", "cv_oof": coverage,
+                                  "test": coverage, "calibrated": True, "conformal_q": 1.7419,
+                                  "alpha": 0.2, "calibration": None}}  # fmt: skip
+    monkeypatch.setattr(ApiClient, "health", lambda self: ApiResult(True, 200, HEALTH))
+    monkeypatch.setattr(ApiClient, "model_info", lambda self: ApiResult(True, 200, info))
+
+    def predict(self: ApiClient, payload: dict[str, Any]) -> ApiResult:
+        body = _prediction(payload) | {"rul_lower": 30.0, "rul_upper": 55.0, "interval_level": 0.8}
+        return ApiResult(True, 200, body | {"interval_calibrated": True})
+
+    monkeypatch.setattr(ApiClient, "predict", predict)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    at.button[0].click().run()
+    assert not at.exception
+    assert any("(conformally calibrated, Q = 1.74)" in c.value for c in at.caption)
+
+
 ANOMALY_INFO = {
     "model_version": "anomaly-test",
     "for_model_version": "test-v1",

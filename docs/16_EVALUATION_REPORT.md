@@ -95,14 +95,14 @@ None of the following is part of the MVP. Each would need its own change record 
 | FD002–FD004 (multiple conditions / fault modes) | Operating-condition normalisation (per-regime sensor scaling), regime-aware features, re-validated data contract and checksums, larger evaluation |
 | ~~Anomaly detection~~ — **IMPLEMENTED in M9** (§10, ADR-035); trend target not met | Remaining: engine-specific baselines, a detection-timing target agreed in advance, evaluation on data with labelled faults |
 | Sequence models (LSTM/CNN/Transformer) | A deep-learning dependency (ADR), GPU-optional training, sequence windows in the shared feature path, longer training |
-| ~~Prediction intervals~~ — **IMPLEMENTED in M8** (§9, ADR-034) | Remaining: calibration toward nominal coverage (e.g. conformal adjustment on out-of-fold residuals) |
+| ~~Prediction intervals~~ — **IMPLEMENTED in M8** (§9, ADR-034); conformally calibrated in M10 (§9d, ADR-037) | Remaining: conditional (per-bucket or engine-aware) calibration; the 21–60 range is still under-covered |
 | Bias correction for the 21–60 range | Residual analysis on CV folds, asymmetric loss or post-hoc calibration, then re-selection |
 | Drift monitoring / retraining | Logging of inputs, distribution checks against `training_ranges`, a retraining trigger and model registry |
 | Cloud deployment | Container registry, managed runtime, auth/TLS, secrets management, cost controls |
 
 ## 9. Prediction intervals (Milestone 8, ADR-034)
 
-Source: [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) and `models/model_intervals_metadata.json`, trained 2026-11-08T18:55:47Z for served model `primary-20261108-f4c86df` (code: commit `8d893ff` plus the uncommitted M8 working tree, `git_dirty: true`).
+Source: [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) and `models/model_intervals_metadata.json`, trained 2026-11-08T18:55:47Z for served model `primary-20261108-f4c86df` (code: commit `8d893ff` plus the uncommitted M8 working tree, `git_dirty: true`). §9a–9c describe the **uncalibrated** (v1.1) interval; the conformal calibration served since M10 is in §9d.
 
 **Method.** Two `HistGradientBoostingRegressor(loss="quantile")` models at q = 0.1 and q = 0.9 give a nominal **80%** interval. They use the served model's features, train-row filter, seed (42) and hyperparameters `{'learning_rate': 0.05, 'max_iter': 200, 'max_leaf_nodes': 15, 'l2_regularization': 0.0}`; there is no search, and the point model is not retrained. Post-processing: clamp to [0, rul_cap]; lower=min(lower, point); upper=max(upper, point). Coverage counts a true RUL inside [lower, upper], inclusive. Training cost: CV 14.3 s (3 models × 5 folds), final fit 1.8 s (2 models).
 
@@ -139,6 +139,45 @@ Reordered: **8** of 100.
 - **Width:** mean 37.2 cycles (CV) / 42.1 (test). Near failure the interval is narrowest (test 0–20: mean 27.7), where it matters most.
 - **Demo engines:** late-life test engine 34 predicts 6.3 in [4.84, 18.76] (true 7, covered). Early-life test engine 1 predicts 125.0 in [118.45, 125.0] (true 112, **not** covered): the cap effect on a single engine.
 - Honest use: treat the interval as an approximate ~74 % (CV, clipped truth) band for engines not beyond the cap, not as a calibrated 80 % guarantee. Calibration (e.g. conformal adjustment on out-of-fold residuals) is a candidate next step, NOT IMPLEMENTED.
+
+### 9d. Conformal calibration (Milestone 10, ADR-037)
+
+Source: the `calibration` section of [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) (run 2026-11-08T20:37:53Z; the quantile models were refitted by the same command and are byte-identical to M8, SHA-256 `9c7cfc5e…6d12`).
+
+**Method.** Standard split-conformal CQR with α = 0.2. On the out-of-fold quantile predictions of §9a: nonconformity E = max(lo − y, y − hi), with **raw** bounds and y = the **capped** RUL (the target the quantile models learn). Q = the ⌈(n+1)(1−α)⌉-th smallest E. Served bounds = clamp-and-order(lo − Q, hi + Q), the same post-processing as §9. **Honest split:** the 100 training engines were split at random (seed 42) into 50 calibration engines (8,810 rows) and 50 evaluation engines (8,921 rows). Q_eval comes from the calibration half and is judged on the evaluation half; no engine is in both halves. The pre-registered criterion (FR-020, written before any number was computed) is evaluation-half coverage against the capped target within 0.80 ± 0.03.
+
+**Evaluation half — the FR-020 number** (Q_eval = **1.320** cycles):
+
+| Scope | n | Coverage, capped target (before → after) | Coverage, unclipped truth (before → after) | Mean width (before → after) |
+|---|---|---|---|---|
+| **All** | 8,921 | 0.734 → **0.777** | 0.504 → 0.536 | 37.2 → 39.2 |
+| true RUL 0-20 | 1,050 | 0.771 → **0.879** | 0.771 → 0.879 | 32.8 → 35.3 |
+| true RUL 21-60 | 2,000 | 0.629 → **0.687** | 0.629 → 0.687 | 44.8 → 47.3 |
+| true RUL 61-125 | 3,202 | 0.757 → **0.776** | 0.757 → 0.776 | 43.6 → 45.6 |
+| true RUL >125 | 2,669 | 0.770 → **0.805** | 0.000 → 0.000 | 25.4 → 26.9 |
+
+**FR-020: 0.7768 → MET** (band 0.770–0.830), by 0.7 percentage points above the lower edge.
+
+**Shipped correction:** Q_final = **1.742** cycles, from all 17,731 out-of-fold rows. On those same rows the calibrated coverage is 0.803 (capped). That is in-sample for Q and close to 0.80 by construction, so it is not evidence.
+
+**Official test set** (100 engines, last cycle; reported, not the criterion; Q_final):
+
+| Scope | n | Coverage, capped target (before → after) | Coverage, unclipped truth (before → after) | Mean width (before → after) |
+|---|---|---|---|---|
+| **All** | 100 | 0.820 → **0.850** | 0.740 → 0.750 | 42.1 → 44.7 |
+| true RUL 0-20 | 16 | 0.938 → **0.938** | 0.938 → 0.938 | 27.7 → 31.1 |
+| true RUL 21-60 | 23 | 0.826 → **0.870** | 0.826 → 0.870 | 49.4 → 52.5 |
+| true RUL 61-125 | 50 | 0.800 → **0.800** | 0.800 → 0.800 | 44.4 → 46.6 |
+| true RUL >125 | 11 | 0.727 → **0.909** | 0.000 → 0.000 | 37.9 → 39.9 |
+
+**Reading the results.**
+
+- One additive correction of under 2 cycles lifts held-out coverage from 0.734 to 0.777 for a 2.0-cycle wider mean interval (37.2 → 39.2). The criterion is met, but only just: held-out coverage stays **below** the nominal 0.80.
+- **Why below nominal:** Q_eval (1.320) is smaller than Q_final (1.742). The 50 calibration engines happened to need less widening than the other 50. The conformal guarantee assumes exchangeable rows, but rows of one engine are strongly correlated. The effective sample is ~50 engines, not ~8,800 rows, so Q itself varies from split to split. Other seeds were **not** tried: the split was fixed in advance, and trying seeds would amount to tuning.
+- **Coverage is marginal, not per bucket.** After calibration the 21–60 bucket is still at 0.687 and 0–20 rises to 0.879. A single additive Q does not fix conditional miscalibration, and the 21–60 range is where the point model is also optimistic (§6).
+- **The cap still decides the > 125 bucket:** against unclipped truth its coverage stays 0.000 by construction; against the capped target it is 0.805 (evaluation half).
+- **Test set:** capped coverage 0.820 → 0.850 and unclipped 0.740 → 0.750; with 11–50 engines per bucket one engine moves a bucket by 2–9 points.
+- **Demo engines:** engine 34 now gets [3.1, 20.5] (was [4.84, 18.76]; true 7 covered). Engine 1 gets [116.7, 125.0] (was [118.45, 125.0]); its true RUL of 112 is still not covered, which is the cap effect again.
 
 ## 10. Anomaly detection (Milestone 9, ADR-035)
 

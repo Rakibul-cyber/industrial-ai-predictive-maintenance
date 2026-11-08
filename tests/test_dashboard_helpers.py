@@ -12,6 +12,7 @@ from predmaint.dashboard.helpers import (
     TrajectoryError,
     anomaly_badge,
     anomaly_series_frame,
+    band_caption,
     compute_trajectory,
     engine_history,
     engine_payload,
@@ -178,3 +179,14 @@ def test_anomaly_series_frame() -> None:
     assert anomaly_series_frame(None) is None
     assert anomaly_series_frame({"series": None}) is None
     assert anomaly_series_frame({"series": []}) is None
+
+
+def test_band_caption_names_conformal_q() -> None:
+    calibrated = {"calibrated": True, "conformal_q": 1.7418749}
+    assert band_caption(calibrated) == (
+        "Shaded: 80 % prediction interval (conformally calibrated, Q = 1.74). "
+    )
+    plain = "Shaded: 80 % prediction interval. "
+    assert band_caption(None) == plain
+    assert band_caption({"calibrated": False, "conformal_q": None}) == plain
+    assert band_caption({"calibrated": True, "conformal_q": None}) == plain

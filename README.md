@@ -1,6 +1,6 @@
 # Industrial AI — Predictive Maintenance Platform
 
-End-to-end remaining-useful-life (RUL) prediction for turbofan engines on NASA's C-MAPSS **FD001** benchmark: reproducible data acquisition, leakage-safe features, engine-grouped cross-validation, two models with a pre-registered selection rule, a FastAPI service, a Streamlit dashboard, Docker Compose and CI. On the official test set (100 engines, unclipped truth) the served **HistGradientBoosting** model reaches **RMSE 16.61 / MAE 12.57 cycles**, against **RMSE 19.14 / MAE 15.35** for the Ridge baseline. It was selected on 5-fold CV RMSE (16.56 vs 19.15), not on the test set. Since Milestone 8 each prediction also carries a nominal 80 % quantile-regression interval, with its coverage reported honestly (below nominal; see Results). Milestone 9 adds a minimal unsupervised anomaly score (`POST /anomaly`): it is implemented and evaluated without labels, but it **did not meet its own trend target** (see Results).
+End-to-end remaining-useful-life (RUL) prediction for turbofan engines on NASA's C-MAPSS **FD001** benchmark: reproducible data acquisition, leakage-safe features, engine-grouped cross-validation, two models with a pre-registered selection rule, a FastAPI service, a Streamlit dashboard, Docker Compose and CI. On the official test set (100 engines, unclipped truth) the served **HistGradientBoosting** model reaches **RMSE 16.61 / MAE 12.57 cycles**, against **RMSE 19.14 / MAE 15.35** for the Ridge baseline. It was selected on 5-fold CV RMSE (16.56 vs 19.15), not on the test set. Since Milestone 8 each prediction also carries a nominal 80 % quantile-regression interval. Since Milestone 10 that interval is conformally calibrated on held-out engines, reaching 77.7 % coverage against the capped target (pre-registered band 77–83 %; see Results). Milestone 9 adds a minimal unsupervised anomaly score (`POST /anomaly`): it is implemented and evaluated without labels, but it **did not meet its own trend target** (see Results).
 
 [![CI](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml/badge.svg)](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml)
 
@@ -117,14 +117,14 @@ Add `?include_series=true` for the score at every full-window cycle. `GET /healt
 | Ridge baseline | 19.15 ± 1.18 | 19.14 | 15.35 | 590.6 |
 | **HistGradientBoosting (served)** | **16.56 ± 0.70** | **16.61** | **12.57** | **441.5** |
 
-**Prediction intervals (nominal 80 %, quantile HGB, Milestone 8):**
+**Prediction intervals (nominal 80 %, quantile HGB from Milestone 8, conformally calibrated in Milestone 10):**
 
-| Evaluation | Coverage, unclipped truth | Coverage, truth clipped at 125 | Mean width (cycles) |
+| Evaluation | Coverage, truth clipped at 125: uncalibrated → calibrated | Coverage, unclipped truth | Mean width (cycles) |
 |---|---|---|---|
-| 5-fold GroupKFold out-of-fold (17,731 rows) | 0.509 | 0.737 | 37.2 |
-| Official test set (100 engines) | 0.740 | 0.820 | 42.1 |
+| **Held-out engines** (50 engines, 8,921 rows; Q calibrated on the other 50) | 0.734 → **0.777** | 0.504 → 0.536 | 37.2 → 39.2 |
+| Official test set (100 engines; shipped Q = 1.74 cycles) | 0.820 → 0.850 | 0.740 → 0.750 | 42.1 → 44.7 |
 
-Coverage is below nominal, and against unclipped truth it is 0 for engines with true RUL > 125 because the bounds cannot exceed the cap. It is reported, not tuned (evaluation report §9).
+The correction is calibrated on held-out engines, and the coverage target (0.80 ± 0.03) was fixed before computing it. It is met, but only just, and coverage is still slightly below nominal. Coverage is uneven across RUL ranges (21–60 cycles: 0.687). Rows of one engine are correlated, so the conformal guarantee is approximate. Against unclipped truth, coverage is 0 for engines with true RUL > 125 because the bounds cannot exceed the cap (evaluation report §9d).
 
 **Anomaly detection (Milestone 9, unsupervised, no labels):** Mahalanobis distance of the 14 rolling-mean sensors from a healthy reference (training rows with true RUL ≥ 125; 5,329 rows from 90 engines), with the threshold set at the 99th percentile of out-of-fold healthy scores.
 
@@ -156,10 +156,10 @@ Full tree with one line per file: [docs/07_REPOSITORY_STRUCTURE.md](docs/07_REPO
 
 ## Testing and CI
 
-- **pytest:** 251 tests pass locally (2 opt-in tests skipped). Line coverage 95.92 %, enforced at **85 %** in `pyproject.toml`.
+- **pytest:** 264 tests pass locally (2 opt-in tests skipped). Line coverage 96.14 %, enforced at **85 %** in `pyproject.toml`.
 - **Markers:** `data` (runs when FD001 is present), `network` (`RUN_NETWORK_TESTS=1`), `docker` (`RUN_DOCKER_TESTS=1`).
 - **Kinds of test:** leakage tests (disjoint engine folds, causal features), an inference contract test (API output == offline prediction), the committed-artifact check (scikit-learn version pin, recorded predictions), and real-data tests that recompute the served model's test RMSE.
-- **CI** (GitHub Actions, `ubuntu-24.04`): `lint-test` (ruff + pytest with the coverage gate) and `docker` (`scripts/smoke_test.sh`: build, compose up, both healthchecks, a `/predict` on the late-life example incl. `rul_lower ≤ predicted_rul ≤ rul_upper`, `/anomaly` on both examples (late one anomalous, engine 1 scoring lower), teardown).
+- **CI** (GitHub Actions, `ubuntu-24.04`): `lint-test` (ruff + pytest with the coverage gate) and `docker` (`scripts/smoke_test.sh`: build, compose up, both healthchecks, a `/predict` on the late-life example incl. `rul_lower ≤ predicted_rul ≤ rul_upper` and `interval_calibrated`, `/anomaly` on both examples (late one anomalous, engine 1 scoring lower), teardown).
 - Strategy: [docs/09_TESTING_STRATEGY.md](docs/09_TESTING_STRATEGY.md).
 
 ## Engineering decisions worth noticing
@@ -168,22 +168,22 @@ Full tree with one line per file: [docs/07_REPOSITORY_STRUCTURE.md](docs/07_REPO
 - **Select on CV, report on test.** The served model is chosen by CV RMSE; the official test set stays a held-out report. [ADR-024](docs/13_DECISION_LOG.md#adr-024--served-model-selected-by-cv-rmse-supersedes-adr-010)
 - **One feature path for training and serving.** `features.build` computes every window independently, so the API's 30-cycle request yields bit-identical features; a contract test enforces API == offline. [ADR-005](docs/13_DECISION_LOG.md#adr-005--feature-strategy)
 - **Degraded-mode API.** Without a loadable model the service still starts. `/health` says `model_loaded: false`, `/predict` returns 503 in the standard envelope, and the container healthcheck reads readiness rather than the status code. [ADR-022](docs/13_DECISION_LOG.md#adr-022--503-without-artifact-demo-reproducibility-path), [ADR-028](docs/13_DECISION_LOG.md#adr-028--health-always-200-readiness-via-model_loaded-amends-adr-022)
-- **Uncertainty without touching the point model.** Two quantile models reuse the served model's pipeline and hyperparameters. The API falls back to null bounds when the interval artifact doesn't match the served model, and coverage is reported by RUL bucket, including where it fails. [ADR-034](docs/13_DECISION_LOG.md#adr-034--prediction-intervals-via-quantile-gradient-boosting-milestone-8)
+- **Uncertainty without touching the point model.** Two quantile models reuse the served model's pipeline and hyperparameters. The API falls back to null bounds when the interval artifact doesn't match the served model, and coverage is reported by RUL bucket, including where it fails. Conformal calibration (M10) reuses the out-of-fold predictions, is judged on held-out engines against a pre-registered target, and changes no model file. [ADR-034](docs/13_DECISION_LOG.md#adr-034--prediction-intervals-via-quantile-gradient-boosting-milestone-8), [ADR-037](docs/13_DECISION_LOG.md#adr-037--conformalized-quantile-regression-for-the-80--interval-milestone-10)
 - **Committed artifact with version checks.** The 451 KB model ships in git and in the image; scikit-learn is pinned, `/model/info` reports a version match, a test fails on drift, and retraining reproduces it byte-for-byte. [ADR-030](docs/13_DECISION_LOG.md#adr-030--commit-the-served-model-artifact-decides-m6-t4)
 
 - **Anomaly score evaluated without labels, and the miss reported.** The threshold comes from out-of-fold healthy scores, the evaluation asks whether the score tracks degradation, and the 0.7 trend target was fixed in advance. It came in at 0.680 and was reported, not tuned. [ADR-035](docs/13_DECISION_LOG.md#adr-035--minimal-anomaly-detection-mahalanobis-distance-to-a-healthy-reference-milestone-9)
 
-All 35 decisions: [docs/13_DECISION_LOG.md](docs/13_DECISION_LOG.md).
+All 36 decisions (ADR-036 unused): [docs/13_DECISION_LOG.md](docs/13_DECISION_LOG.md).
 
 ## Limitations and future work
 
 - FD001 only (one operating condition, one fault mode; simulated data).
 - Predictions are capped at 125 cycles: engines with longer true RUL are under-predicted, and early-life engines (e.g. test engine 1, true RUL 112) show the cap.
 - On the test set, predictions for engines with 21–60 cycles left are on average ~5 cycles **late** (optimistic).
-- The 80 % prediction intervals under-cover (out-of-fold 0.737 against capped truth) and cannot cover true RUL > 125; treat them as approximate. Health bands are illustrative.
+- The calibrated 80 % intervals cover 0.777 of held-out-engine rows against capped truth (just inside the pre-registered band, slightly below nominal), unevenly by RUL range, and cannot cover true RUL > 125; treat them as approximate. Health bands are illustrative.
 - The anomaly score missed its trend target (median 0.680 ≤ 0.7); test-engine trends are weak (median 0.213) because most test engines are cut off early in life. It has no fault labels to be validated against.
 - The pickled model is tied to the scikit-learn pin.
-- Candidate next steps, **not implemented**: FD002–FD004 with condition normalisation, interval calibration (e.g. conformal), bias correction, engine-specific anomaly baselines, drift monitoring. See [docs/16_EVALUATION_REPORT.md §8](docs/16_EVALUATION_REPORT.md).
+- Candidate next steps, **not implemented**: FD002–FD004 with condition normalisation, conditional (per-RUL-range) interval calibration, bias correction, engine-specific anomaly baselines, drift monitoring. See [docs/16_EVALUATION_REPORT.md §8](docs/16_EVALUATION_REPORT.md).
 
 ## Dataset citation and acknowledgment
 

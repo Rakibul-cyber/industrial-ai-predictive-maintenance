@@ -289,6 +289,35 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** FR-019 measured and reported (met or not met stated plainly); point and interval artifacts byte-identical; all tests pass with the 85 % gate; smoke test passes with the anomaly assertions.
 - **Estimated effort:** 4 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting review). Implemented and verified; the FR-019 trend target was **not met** (median 0.680 ≤ 0.7, reported, not tuned). Evidence in 14.
 
+## M10 — Conformalized quantile regression (post-MVP extension, CR-011 / ADR-037)
+
+- **Objective:** calibrate the 80 % interval with split-conformal CQR on the existing out-of-fold predictions, evaluated on held-out engines, without retraining any model.
+- **Dependencies:** M9 (committed `1e728ca`; screenshots `d9b9772`; CI run 42520315423 green).
+- **Requirements:** FR-020.
+- **Files to create:** none (tests go into `tests/test_intervals.py`).
+- **Files to modify:** `src/predmaint/__init__.py` (0.4.0), `models/intervals.py`, `models/predict.py`, `api/{schemas,service}.py`, `dashboard/app.py` (band caption), `models/model_intervals_metadata.json`, `reports/metrics_intervals.json`, `examples/expected_predictions.json`, `scripts/smoke_test.sh`, tests, README, CLAUDE.md, docs.
+- **Tasks:**
+  - [x] M10-T1 Change control first: CR-011, ADR-037, FR-020 (target pre-registered before any calibration number was computed), doc 00 scope, this plan.
+  - [x] M10-T2 `models/intervals.py`: `nonconformity`, `conformal_quantile`, `engine_split`, `calibrate`; the interval step keeps the raw out-of-fold bounds and writes the `calibration` section, `conformal_q` and `alpha` (metadata + `reports/metrics_intervals.json`).
+  - [x] M10-T3 Inference: `order_bounds(..., conformal_q)` applies Q before clamping and ordering; `IntervalModel.conformal_q` / `.calibrated`; `PredictionResult.interval_calibrated`; metadata without Q → v1.1 behaviour.
+  - [x] M10-T4 API 0.4.0: `/predict.interval_calibrated`; `/model/info.intervals` gains `calibrated`, `conformal_q`, `alpha`, `calibration`.
+  - [x] M10-T5 Dashboard: trajectory band caption names Q (`helpers.band_caption`).
+  - [x] M10-T6 Calibration run; sidecar regenerated (bounds widen by Q; point and anomaly values unchanged); smoke test asserts `interval_calibrated`.
+  - [x] M10-T7 Tests (hand Q, invariants, v1.1 fallback, synthetic coverage, API, dashboard, real data).
+- **Verification commands:**
+
+  ```bash
+  ruff check . && ruff format --check .
+  pytest -q
+  shasum -a 256 models/model.joblib models/model_intervals.joblib    # before and after
+  python scripts/train.py --model intervals
+  API_PORT=8001 python -m predmaint.api.main &   # curl /predict for engine 1 and engine 34
+  bash scripts/smoke_test.sh; echo $?
+  ```
+
+- **Acceptance criteria:** FR-020 measured and stated (met or not met); point and quantile artifacts byte-identical; all tests pass with the 85 % gate; smoke test asserts `interval_calibrated: true`.
+- **Estimated effort:** 3 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting review). FR-020 **met, narrowly** (0.777 within 0.77–0.83). Evidence in 14.
+
 ## Requirement → milestone traceability
 
 | Milestone | Requirements |
@@ -302,3 +331,4 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 | M7 | NFR-005, NFR-009 |
 | M8 | FR-018 |
 | M9 | FR-019 |
+| M10 | FR-020 |

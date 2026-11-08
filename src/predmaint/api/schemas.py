@@ -69,9 +69,10 @@ class PredictResponse(BaseModel):
                     "last_cycle": 31,
                     "model_version": "primary-20261108-f4c86df",
                     "warnings": [],
-                    "rul_lower": 98.4,
+                    "rul_lower": 116.7,
                     "rul_upper": 125.0,
                     "interval_level": 0.8,
+                    "interval_calibrated": True,
                 }
             ]
         }
@@ -93,6 +94,11 @@ class PredictResponse(BaseModel):
     )
     interval_level: float | None = Field(
         default=None, description="Nominal interval level (0.8), or null without intervals."
+    )
+    interval_calibrated: bool | None = Field(
+        default=None,
+        description="True when the bounds carry the conformal (CQR) correction (ADR-037); "
+        "false for uncalibrated interval metadata; null without intervals.",
     )
 
 
@@ -140,8 +146,25 @@ class IntervalCoverage(BaseModel):
     n_reordered: int
 
 
+class CalibrationInfo(BaseModel):
+    """Conformal (CQR) calibration summary (ADR-037)."""
+
+    method: str
+    target: str
+    q_eval: float
+    n_calibration_engines: int
+    n_evaluation_engines: int
+    evaluation_half_before: IntervalCoverage
+    evaluation_half_after: IntervalCoverage
+    test_before: IntervalCoverage
+    test_after: IntervalCoverage
+    acceptance_criterion: str
+    acceptance_met: bool
+    caveat: str
+
+
 class IntervalsInfo(BaseModel):
-    """Prediction-interval artifact summary (ADR-034)."""
+    """Prediction-interval artifact summary (ADR-034; calibration ADR-037)."""
 
     model_config = ConfigDict(protected_namespaces=())
 
@@ -150,8 +173,12 @@ class IntervalsInfo(BaseModel):
     quantiles: list[float]
     interval_level: float
     trained_at: str
-    cv_oof: IntervalCoverage
-    test: IntervalCoverage
+    cv_oof: IntervalCoverage = Field(description="Uncalibrated (v1.1) out-of-fold coverage.")
+    test: IntervalCoverage = Field(description="Uncalibrated (v1.1) official-test coverage.")
+    calibrated: bool = False
+    conformal_q: float | None = None
+    alpha: float | None = None
+    calibration: CalibrationInfo | None = None
 
 
 class AnomalySeriesPoint(BaseModel):

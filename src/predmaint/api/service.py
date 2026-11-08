@@ -14,6 +14,7 @@ import sklearn
 from predmaint.api.schemas import (
     AnomalyInfo,
     AnomalyResponse,
+    CalibrationInfo,
     IntervalsInfo,
     ModelInfoResponse,
     PredictRequest,
@@ -143,6 +144,7 @@ class ModelService:
             rul_lower=None if result.rul_lower is None else round(result.rul_lower, 2),
             rul_upper=None if result.rul_upper is None else round(result.rul_upper, 2),
             interval_level=result.interval_level,
+            interval_calibrated=result.interval_calibrated,
         )
 
     def model_info(self) -> ModelInfoResponse:
@@ -206,7 +208,30 @@ class ModelService:
             trained_at=meta["trained_at"],
             cv_oof=meta["evaluation"]["cv_oof"]["overall"],
             test=meta["evaluation"]["test"]["overall"],
+            calibrated=self.intervals.calibrated,
+            conformal_q=self.intervals.conformal_q,
+            alpha=meta.get("alpha"),
+            calibration=_calibration_info(meta.get("calibration")),
         )
+
+
+def _calibration_info(cal: dict[str, Any] | None) -> CalibrationInfo | None:
+    if not cal:
+        return None
+    return CalibrationInfo(
+        method=cal["method"],
+        target=cal["target"],
+        q_eval=cal["q_eval"],
+        n_calibration_engines=cal["split"]["n_calibration_engines"],
+        n_evaluation_engines=cal["split"]["n_evaluation_engines"],
+        evaluation_half_before=cal["evaluation_half"]["before"]["overall"],
+        evaluation_half_after=cal["evaluation_half"]["after"]["overall"],
+        test_before=cal["test"]["before"]["overall"],
+        test_after=cal["test"]["after"]["overall"],
+        acceptance_criterion=cal["acceptance"]["criterion"],
+        acceptance_met=cal["acceptance"]["met"],
+        caveat=cal["caveat"],
+    )
 
 
 def request_payload(frame: pd.DataFrame, unit_id: str | None = None) -> dict[str, Any]:
@@ -241,6 +266,7 @@ def expected_prediction(
         "rul_lower": None if result.rul_lower is None else round(result.rul_lower, 2),
         "rul_upper": None if result.rul_upper is None else round(result.rul_upper, 2),
         "interval_level": result.interval_level,
+        "interval_calibrated": result.interval_calibrated,
         "true_rul_at_last_cycle": true_rul,
         "anomaly": None
         if scored is None

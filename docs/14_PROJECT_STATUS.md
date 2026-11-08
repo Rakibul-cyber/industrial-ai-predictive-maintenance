@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **MVP COMPLETE** (M0–M7) + M8 (prediction intervals, committed `a25df0e`) + **Milestone 9 (minimal anomaly detection, CR-010) COMPLETE** — uncommitted, awaiting review. FR-019 trend target **not met** (0.680 ≤ 0.7). |
+| Current milestone | **MVP COMPLETE** (M0–M7) + M8 (intervals, `a25df0e`) + M9 (anomaly detection, `1e728ca`; FR-019 not met) + **Milestone 10 (CQR interval calibration, CR-011) COMPLETE** — uncommitted, awaiting review. FR-020 **met, narrowly** (0.777 in 0.77–0.83). |
 | Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `a25df0e` (M8, committed and pushed by the user; CI run 42514386686 green: lint-test + docker). M9 work is uncommitted. |
-| Next approved action | User review and commit of M9 — commit the two new model files together with the four existing ones (10 §6); the push runs the CI `docker` job with the anomaly assertions. Rebuild any running demo stack with `--build`. Commit `docs/img/` with it (screenshots added, below). Further work goes through 15. |
+| Git ref | `main` = `origin/main` @ `d9b9772` (M9 `1e728ca` + screenshots, committed and pushed by the user; CI run 42520315423 green). M10 work is uncommitted. |
+| Next approved action | User review and commit of M10: `models/model_intervals_metadata.json`, `reports/metrics_intervals.json` and `examples/expected_predictions.json` together with the code (the `.joblib` files are unchanged). The push runs the CI `docker` job with the `interval_calibrated` assertion. Rebuild the running demo stack with `--build` (it still runs the pre-M10 image). Further work goes through 15. |
 
 ## Milestone tracker
 
@@ -20,7 +20,8 @@
 | M6 Docker, tests, CI (ADR-030–032) | **Accepted** 2026-11-08; committed `ccf68a7`, pushed; CI green incl. `docker` job (amd64) | M6 section below |
 | M7 Finalisation | **COMPLETE** 2026-11-08; committed `32fdae0` | M7 section below |
 | M8 Prediction intervals (CR-008, ADR-034) | **COMPLETE** 2026-11-08; committed `a25df0e`, pushed; CI run 42514386686 green | M8 section below |
-| M9 Minimal anomaly detection (CR-010, ADR-035) | **COMPLETE** 2026-11-08 (uncommitted, awaiting review); FR-019 trend target **not met** | M9 section below |
+| M9 Minimal anomaly detection (CR-010, ADR-035) | **COMPLETE** 2026-11-08; committed `1e728ca`, pushed; CI green; FR-019 trend target **not met** | M9 section below |
+| M10 CQR interval calibration (CR-011, ADR-037) | **COMPLETE** 2026-11-08 (uncommitted, awaiting review); FR-020 **met, narrowly** | M10 section below |
 
 ## M0 — what was verified (actual command results)
 
@@ -549,6 +550,56 @@ $ pytest -q -m data --no-cov → 13 passed · DATA_DIR=/nonexistent pytest -q �
 - The anomaly metadata records `git_dirty: true` (trained on the uncommitted M9 tree on top of `a25df0e`); its `model_version` is therefore `anomaly-20261108-a25df0e`.
 - Coverage of `src/predmaint`: 95.92 % (from 95.42 %); `models/anomaly.py` 99 %.
 
+## M10 — conformalized quantile regression (2026-11-08)
+
+**Start:** working tree clean; `main` = `origin/main` @ `d9b9772`; CI run 42520315423 (on `d9b9772`) `completed / success`, read from the GitHub REST API (no `gh` CLI on this machine). **Change control first:** CR-011, ADR-037, FR-020 (target pre-registered), M10 plan and doc 00 scope were written **before** any calibration number was computed. ADR-036 is unused (it was reserved in M9 for a title restoration that was not triggered). **Before code changes:** re-running the existing interval step on a copy of the served model reproduced `model_intervals.joblib` byte-for-byte, so the training command could gain the calibration without changing the shipped models.
+
+```text
+$ shasum -a 256 models/model.joblib models/model_intervals.joblib      (before)
+39bfa6fd4a168b263acac4ccefa0be81a4fc838afa7eb14bf7306ad1099128c1  models/model.joblib
+9c7cfc5ea175516ca5a2e06177f2eebd3c2159768c692d3b046bc9939ae96d12  models/model_intervals.joblib
+$ python scripts/train.py --model intervals        (trimmed: the v1.1 tables are unchanged from M8)
+5-fold GroupKFold out-of-fold: n=17731 coverage(unclipped)=0.509 coverage(clipped)=0.737 mean width=37.20 median width=36.66 reordered=1023
+Official test set (last cycle): n=100 coverage(unclipped)=0.740 coverage(clipped)=0.820 mean width=42.13 median width=41.96 reordered=8
+Conformal calibration (CQR, alpha=0.2, target = capped RUL): engines split seed 42: 50 calibration (8,810 rows) / 50 evaluation (8,921 rows)
+Q_eval (calibration half) = 1.3203
+Evaluation half, BEFORE (v1.1): n=8921 coverage(unclipped)=0.504 coverage(clipped)=0.734 mean width=37.15 median width=36.54 reordered=569
+Evaluation half, AFTER (Q_eval=1.3203): n=8921 coverage(unclipped)=0.536 coverage(clipped)=0.777 mean width=39.19 median width=38.57 reordered=351
+  0-20 0.879 · 21-60 0.687 · 61-125 0.776 · >125 0.000 unclipped / 0.805 clipped
+Q_final (all 17,731 out-of-fold rows; shipped) = 1.7419
+All OOF rows AFTER Q_final (in-sample for Q, not held out): n=17731 coverage(unclipped)=0.549 coverage(clipped)=0.803 mean width=39.87 median width=39.37 reordered=505
+Official test BEFORE (v1.1): n=100 coverage(unclipped)=0.740 coverage(clipped)=0.820 mean width=42.13 median width=41.96 reordered=8
+Official test AFTER (Q_final=1.7419): n=100 coverage(unclipped)=0.750 coverage(clipped)=0.850 mean width=44.74 median width=43.70 reordered=6
+FR-020 (evaluation-half coverage (capped target) within 0.80 ± 0.03): value 0.7768 → MET
+Caveat: Split-conformal coverage assumes exchangeable rows; rows of one engine are correlated, so the guarantee is approximate: the effective sample size is closer to the number of engines than to the number of rows.
+Timings: CV 13.6 s (3 models x 5 folds), final fit 1.9 s (2 quantile models)
+Elapsed: 15.6 s     [time -p: real 17.23, user 84.23, sys 30.77]
+$ shasum -a 256 models/model.joblib models/model_intervals.joblib      (after: identical)
+39bfa6fd4a168b263acac4ccefa0be81a4fc838afa7eb14bf7306ad1099128c1  models/model.joblib
+9c7cfc5ea175516ca5a2e06177f2eebd3c2159768c692d3b046bc9939ae96d12  models/model_intervals.joblib
+  (model_metadata.json, model_anomaly.joblib, model_anomaly_metadata.json also OK; model_intervals_metadata.json changed as intended)
+$ API_PORT=8001 python -m predmaint.api.main      (8000/8501 held by the user's demo stack, not touched)
+$ curl /health → {…"api_version":"0.4.0","intervals_loaded":true,"anomaly_loaded":true}
+$ curl -X POST /predict @examples/predict_request.json → {"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy",…,"rul_lower":116.7,"rul_upper":125.0,"interval_level":0.8,"interval_calibrated":true}     (M8: 118.45)
+$ curl -X POST /predict @examples/predict_request_late.json → {"unit_id":"test-unit-34","predicted_rul":6.3,"health_status":"critical",…,"rul_lower":3.1,"rul_upper":20.5,"interval_level":0.8,"interval_calibrated":true}     (M8: 4.84 / 18.76)
+$ bash scripts/smoke_test.sh; echo $?     (ports 18000/18501)
+  /health → {…"api_version":"0.4.0",…} · /predict late → {…"rul_lower":3.1,"rul_upper":20.5,"interval_level":0.8,"interval_calibrated":true}
+  SMOKE TEST PASSED (arm64) · exit code 0 · image content 243,197,600 bytes
+$ ruff check . → All checks passed!  ·  ruff format --check . → 70 files already formatted
+$ pytest -q → Required test coverage of 85% reached. Total coverage: 96.14% · 264 passed, 2 skipped
+$ pytest -q -m data --no-cov → 15 passed · DATA_DIR=/nonexistent pytest -q → 252 passed, 14 skipped; coverage 96.03%
+```
+
+**Findings:**
+
+- **FR-020 met, narrowly:** 0.7768 against the 0.77–0.83 band; held-out coverage is still below the nominal 0.80. Q_eval (1.320, 50 engines) < Q_final (1.742, 100 engines) shows the engine-level variability named in the caveat. No other seed, α or method was tried.
+- **Marginal, not conditional:** after calibration the 21–60 bucket is at 0.687 (evaluation half). Recorded in 16 §9d and 12 R16.
+- **Artifacts:** `model_intervals.joblib` and `model.joblib` are byte-identical (SHA-256 above). `model_intervals_metadata.json` gained `conformal_q`, `alpha` and `calibration`; its v1.1 `evaluation` block is unchanged. The run refreshed `trained_at` (2026-11-08T20:37:53Z), `git_sha` (`d9b9772`) and timings, because the command refits the quantile models, deterministically. Sidecar: bounds widened (engine 1 [116.7, 125.0], engine 34 [3.1, 20.5]); point and anomaly values unchanged.
+- **Defect found and fixed within M10 (test only):** the real-data reproduction test first compared pickle bytes inside the pytest process. That failed in the full suite and passed alone: the bytes differed (first difference at byte 1,817) after other tests had run in the process, while every calibration number matched. The cause was not investigated further; process-dependent pickle memoisation is a plausible explanation (**UNVERIFIED**). Fresh-process byte identity is already shown by the SHA-256 check above. The test now compares the refitted models' predictions instead (attempt 1 of 2).
+- **Existing tests changed only for the new field:** the exact `/predict` body in `test_api` and the dataclass equality in `test_intervals` gained `interval_calibrated`; the artifact/real-data sidecar checks include it.
+- The `PredictResponse` OpenAPI example carried a placeholder `rul_lower` of 98.4 since M8; it now shows the real engine-1 body.
+- The dashboard's **model-info** intervals table still shows the v1.1 (uncalibrated) coverage; per the authorization, only the trajectory band caption changed. `/model/info` carries both.
+
 ## Screenshots (2026-11-08, docs only, after M9)
 
 The owner supplied four dashboard screenshots as attachments in this session. None were in the repository. Each was identified from its content (active tab), not its filename, and copied to the path the README already references. No code changed, and the README needed no change.
@@ -584,3 +635,4 @@ The first trajectory and upload screenshots showed empty tabs, so the owner supp
 | **Final (M7)** | 187 passed, 2 skipped (opt-in); 11 real-data tests passed; coverage 94.98 % (gate 85 %); CI run 42509206610 green (lint-test + docker) | M7 |
 | **M8** | 208 passed, 2 skipped; 12 real-data tests; coverage 95.42 %; intervals CV coverage 0.509 / 0.737 (unclipped / clipped), test 0.740 / 0.820; smoke test exit 0 | M8 |
 | **M9** | 251 passed, 2 skipped; 13 real-data tests; coverage 95.92 %; anomaly trend median 0.680 train OOF (target > 0.7, **not met**), 0.213 test; false-alarm rate 0.0101; detection at median 0.758 of life / 49 cycles RUL; test flags 0.750 (RUL ≤ 20) → 0.000 (> 125); smoke test exit 0 | M9 |
+| **M10** | 264 passed, 2 skipped; 15 real-data tests; coverage 96.14 %; CQR Q_eval 1.320 / Q_final 1.742; held-out-engine coverage 0.734 → 0.777 (capped; FR-020 met, band 0.77–0.83); test 0.820 → 0.850 (capped), 0.740 → 0.750 (unclipped); artifacts byte-identical; smoke test exit 0 | M10 |

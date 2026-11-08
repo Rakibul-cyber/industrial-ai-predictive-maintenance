@@ -39,6 +39,8 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-033 | Project renamed "Industrial AI — Predictive Maintenance Platform"; anomaly detection stays an unauthorized extension | Accepted (2026-11-08, user-directed, CR-007) |
 | ADR-034 | Prediction intervals: two quantile HGB models (q0.1/q0.9), separate artifact, graceful fallback | Accepted (2026-11-08, user-directed, CR-008) |
 | ADR-035 | Minimal anomaly detection: Mahalanobis distance to a healthy reference, OOF threshold | Accepted (2026-11-08, user-directed, CR-010) |
+| ADR-036 | *Unused.* Reserved in M9 for restoring the full project title if FR-019 were met; it was not met, so no ADR-036 exists. | — |
+| ADR-037 | Conformalized quantile regression (CQR) for the 80 % interval; one additive correction Q from OOF predictions | Accepted (2026-11-08, user-directed, CR-011) |
 
 ---
 
@@ -321,3 +323,20 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Consequences:** the score measures distance from a population-level healthy state, not engine-specific baselines; without labels the evaluation shows the score tracks simulated degradation, not that it detects real faults.
 - **Outcome (M9, 2026-11-08):** fallback not triggered (median 0.680 ≥ 0.5); FR-019 trend target not met (0.680 ≤ 0.7). Per the M9 authorization the project title stays as is and no follow-up ADR (title restoration) was added.
 
+### ADR-037 — Conformalized quantile regression for the 80 % interval (Milestone 10)
+
+- **Context:** CR-011. The M8 interval (ADR-034) covers 0.737 of out-of-fold rows against the capped target, for a nominal 0.80.
+- **Decision:**
+  - **Method (standard split-conformal CQR, α = 0.2):** for calibration rows with target y and **raw** quantile-model bounds [lo, hi] (before clamping and ordering), nonconformity E = max(lo − y, y − hi). With n calibration rows and k = ⌈(n + 1)(1 − α)⌉, Q = the k-th smallest E (k > n → Q = +∞). Calibrated interval = [lo − Q, hi + Q], then the unchanged ADR-034 post-processing: clamp to [0, RUL_CAP], `lower = min(lower, point)`, `upper = max(upper, point)`. The correction is applied in that same function (`order_bounds`), so training evaluation and the API share it.
+  - **Target:** the **capped** RUL (what the quantile models learn) for calibration and for the acceptance criterion. Coverage against unclipped truth is also reported; for true RUL > 125 it stays 0 by construction (bounds ≤ 125).
+  - **Data:** the existing 5-fold GroupKFold out-of-fold quantile (and point) predictions on all eligible training rows; no extra model is trained.
+  - **Honest evaluation:** training **engines** are split at random (`numpy.random.default_rng(random_seed=42)` permutation of the sorted unit ids; first half = calibration, rest = evaluation). Q_eval is computed on calibration-half rows; coverage and width are measured on evaluation-half rows before and after calibration → **the FR-020 number**. The shipped Q_final is computed on **all** out-of-fold rows; test-set coverage and width are reported with Q_final. Both Q values are recorded.
+  - **Pre-registered acceptance (FR-020):** evaluation-half coverage of the calibrated interval against the capped target within **0.80 ± 0.03** (0.77 ≤ c ≤ 0.83). Test coverage is reported, not the criterion. A miss is reported, not tuned.
+  - **Artifact:** `models/model_intervals_metadata.json` gains `conformal_q`, `alpha`, `calibration` (method, target, split, evaluation results); `model_intervals.joblib` is unchanged (checksum-verified). Metadata without `conformal_q` behaves exactly as v1.1 (M8) and reports `calibrated: false`.
+  - **API (additive):** `/predict.interval_calibrated` (bool, `null` without intervals); `/model/info.intervals` gains `calibrated`, `conformal_q`, `alpha`, calibration coverage results and the caveat; `api_version` 0.4.0. Dashboard: trajectory band caption only.
+- **Sign of Q:** standard CQR allows Q < 0, which would narrow an over-covering interval. The M8 interval under-covers, so a positive Q is expected; the sign is recorded, and widen-only behaviour is a property of Q ≥ 0, not an extra clamp.
+- **Caveat (exchangeability):** the split-conformal guarantee assumes exchangeable rows. Rows of one engine are strongly correlated, and calibration rows come from 50 engines, so the guarantee is approximate. The engine-level split makes the evaluation honest (no engine is in both halves), but the effective sample size is closer to the number of engines than to the number of rows.
+- **Alternatives:** a per-bucket or scaled correction (more parameters, more tuning surface); retraining quantiles at other levels (tuning toward the target); conformal on point residuals (discards the input-dependent widths).
+- **Rationale:** one parameter, no new dependency, no retraining, reuses predictions the pipeline already makes, and is the documented fix from 16 §9.
+- **Consequences:** intervals widen by Q everywhere (before clamping); the > 125 structural zero against unclipped truth is unchanged; retraining order unchanged (`--select`, then `--model intervals`, which now also calibrates).
+- **Outcome (M10, 2026-11-08):** Q_eval = 1.320 (50 calibration engines) → evaluation-half coverage 0.734 → **0.777** (capped target): FR-020 met at the lower edge of the band. Q_final = 1.742 (all 17,731 OOF rows) ships. Test coverage 0.820 → 0.850 (capped), 0.740 → 0.750 (unclipped). Q is positive, so no interval narrowed. Q_eval < Q_final and the evaluation half still sits below 0.80, which is the engine-level (non-exchangeable) effect named in the caveat.

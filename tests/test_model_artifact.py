@@ -67,6 +67,7 @@ def test_committed_artifact_reproduces_sidecar(example: str) -> None:
     assert round(result.rul_lower, 2) == expected["rul_lower"]
     assert round(result.rul_upper, 2) == expected["rul_upper"]
     assert result.interval_level == expected["interval_level"]
+    assert result.interval_calibrated is expected["interval_calibrated"] is True
     assert result.health_status == expected["health_status"]
     assert result.model_version == expected["model_version"]
 

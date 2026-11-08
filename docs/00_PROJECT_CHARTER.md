@@ -64,7 +64,9 @@ These are candidate extensions only after Milestone 7 and only via [15](15_CHANG
 
 **Post-MVP extension (Milestone 8, CR-008 / ADR-034):** prediction intervals (nominal 80 %, quantile gradient boosting) on `/predict`, in the dashboard and in the evaluation report. This moves out of the extensions list into implemented scope; the other extensions remain NOT IMPLEMENTED.
 
-**Post-MVP extension (Milestone 9, CR-010 / ADR-035):** minimal unsupervised anomaly detection: Mahalanobis distance of rolling-mean sensors to a healthy reference (true RUL ≥ 125), out-of-fold threshold, `POST /anomaly`, dashboard view, and evaluation without labels (trend, false alarms, detection timing). Outcome: implemented and verified, but its trend target (median per-engine Spearman > 0.7 on train OOF) was **not met** (0.680; 16 §10), so the project title is unchanged. Remaining extensions stay NOT IMPLEMENTED.
+**Post-MVP extension (Milestone 9, CR-010 / ADR-035):** minimal unsupervised anomaly detection: Mahalanobis distance of rolling-mean sensors to a healthy reference (true RUL ≥ 125), out-of-fold threshold, `POST /anomaly`, dashboard view, and evaluation without labels (trend, false alarms, detection timing). Outcome: implemented and verified, but its trend target (median per-engine Spearman > 0.7 on train OOF) was **not met** (0.680; 16 §10), so the project title is unchanged.
+
+**Post-MVP extension (Milestone 10, CR-011 / ADR-037):** conformal calibration (CQR) of the M8 80 % interval using the existing out-of-fold predictions, evaluated on held-out training engines against a pre-registered coverage target (FR-020). No model is retrained. Outcome: FR-020 met narrowly (held-out coverage 0.777 for a 0.77–0.83 band; 16 §9d). Remaining extensions stay NOT IMPLEMENTED.
 
 ## 8. Success criteria
 

@@ -157,3 +157,14 @@ Append to the "Change records" section below **before** implementing, and get us
 | Regression tests | New anomaly tests (synthetic drift, OOF threshold, inference, API, dashboard, real data); full suite with the 85 % gate. |
 | Approval | Authorized by the user on 2026-11-08 (M9 authorization). |
 
+### CR-011 — Conformalized quantile regression for the 80 % interval (post-MVP extension, Milestone 10) (2026-11-08)
+
+| Field | Content |
+|---|---|
+| Reason | Approved scope extension (§1.4), authorized by the user on 2026-11-08. The M8 intervals under-cover: out-of-fold coverage 0.737 against the capped target for a nominal 0.80 (16 §9, R16). Conformal calibration was recorded there as the documented next step. |
+| Evidence | `reports/metrics_intervals.json` (M8): `evaluation.cv_oof.overall.coverage_clipped` = 0.7370706671930517; 16 §9c; 12 R16; M10 authorization. |
+| Impact | No model is retrained in substance: `scripts/train.py --model intervals` gains a calibration step on the out-of-fold quantile predictions it already computes. `models/model_intervals_metadata.json` and `reports/metrics_intervals.json` gain the conformal correction and its evaluation. Verified before M10 that re-running the command reproduces `model_intervals.joblib` byte-for-byte (`9c7cfc5e…6d12`). Inference applies the correction in the existing clamp-and-order step. API additive (`/predict.interval_calibrated`, `/model/info.intervals` calibration fields), `api_version` 0.4.0; dashboard band caption; sidecar bounds regenerated. No new dependency. |
+| Smallest fix | Standard split-conformal CQR with one additive correction Q (ADR-037), α = 0.2 fixed by the nominal level; no tuning of α, quantiles or models. |
+| Affected docs | 00, 01, 05, 06, 08, 09, 11, 12, 13, 14, 15, 16, 17, README, CLAUDE.md. |
+| Regression tests | Q hand example; widen-only/ordering/clamp invariants; v1.1 fallback without Q; synthetic coverage near 1 − α; API fields; real-data reproduction of the calibration numbers; sidecar. Full suite with the 85 % gate. |
+| Approval | Authorized by the user on 2026-11-08 (M10 authorization). |

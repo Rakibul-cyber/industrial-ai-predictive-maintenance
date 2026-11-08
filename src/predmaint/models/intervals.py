@@ -5,9 +5,13 @@ on exactly the served point model's features, train-row filter, seed and hyperpa
 read from ``models/model_metadata.json``. The point model is never retrained or modified.
 Coverage and width are measured on 5-fold GroupKFold out-of-fold predictions and on the
 official test set at each engine's last cycle; nothing is tuned toward the nominal level.
+
+Milestone 10 (ADR-037) adds split-conformal CQR on the same out-of-fold predictions: one additive
+correction Q, evaluated on a held-out half of the training engines (FR-020).
 """
 
 import json
+import math
 import platform
 import time
 from collections.abc import Callable
@@ -44,6 +48,13 @@ BUCKETS: tuple[tuple[str, float, float], ...] = (
     (">125", 125.5, np.inf),
 )
 RAW_RUL = "rul_raw"
+ALPHA = round(1.0 - INTERVAL_LEVEL, 10)  # 0.2, fixed by the nominal level (no tuning)
+FR020_TOLERANCE = 0.03  # pre-registered: evaluation-half coverage within 0.80 ± 0.03
+CALIBRATION_CAVEAT = (
+    "Split-conformal coverage assumes exchangeable rows; rows of one engine are correlated, so "
+    "the guarantee is approximate: the effective sample size is closer to the number of engines "
+    "than to the number of rows."
+)
 
 Echo = Callable[[str], None]
 
@@ -81,6 +92,103 @@ def summarize_intervals(
             block["n"] = 0
         buckets.append({"true_rul_bucket": label, **block})
     return {"overall": overall, "buckets": buckets}
+
+
+def nonconformity(y: np.ndarray, lower: np.ndarray, upper: np.ndarray) -> np.ndarray:
+    """CQR nonconformity score ``E = max(lower - y, y - upper)`` (raw quantile bounds)."""
+    y, lower, upper = (np.asarray(a, dtype=float) for a in (y, lower, upper))
+    return np.maximum(lower - y, y - upper)
+
+
+def conformal_quantile(scores: np.ndarray, alpha: float = ALPHA) -> float:
+    """The ``ceil((n + 1)(1 - alpha))``-th smallest score (``+inf`` if that exceeds ``n``).
+
+    Raises:
+        ValueError: if ``scores`` is empty or ``alpha`` is not in (0, 1).
+    """
+    values = np.sort(np.asarray(scores, dtype=float))
+    if values.size == 0:
+        raise ValueError("no calibration scores")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+    k = math.ceil(round((values.size + 1) * (1.0 - alpha), 9))
+    return math.inf if k > values.size else float(values[k - 1])
+
+
+def engine_split(units: np.ndarray, seed: int) -> tuple[list[int], list[int]]:
+    """Random half/half split of engine ids: ``(calibration, evaluation)``, each sorted."""
+    unique = np.unique(np.asarray(units))
+    permuted = np.random.default_rng(seed).permutation(unique)
+    half = len(unique) // 2
+    return sorted(int(u) for u in permuted[:half]), sorted(int(u) for u in permuted[half:])
+
+
+def calibrate(
+    units: np.ndarray,
+    target: np.ndarray,
+    truth: np.ndarray,
+    point: np.ndarray,
+    raw_lower: np.ndarray,
+    raw_upper: np.ndarray,
+    rul_cap: int | None,
+    seed: int,
+    alpha: float = ALPHA,
+) -> dict[str, Any]:
+    """CQR on out-of-fold predictions (ADR-037).
+
+    ``target`` is what the quantile models learn (capped RUL); ``truth`` is unclipped RUL for
+    reporting. Q_eval comes from the calibration-half engines and is evaluated on the other
+    half (the FR-020 number); Q_final uses every row and is the value that ships.
+    """
+    units = np.asarray(units)
+    scores = nonconformity(target, raw_lower, raw_upper)
+    cal_units, eval_units = engine_split(units, seed)
+    cal, ev = np.isin(units, cal_units), np.isin(units, eval_units)
+    q_eval = conformal_quantile(scores[cal], alpha)
+    q_final = conformal_quantile(scores, alpha)
+    if not (math.isfinite(q_eval) and math.isfinite(q_final)):
+        raise ValueError("too few calibration rows for the conformal quantile")
+
+    def served(mask: np.ndarray, q: float | None) -> dict[str, Any]:
+        lo, hi, n = order_bounds(point[mask], raw_lower[mask], raw_upper[mask], rul_cap, q)
+        return summarize_intervals(truth[mask], lo, hi, rul_cap, n)
+
+    everything = np.ones(len(units), dtype=bool)
+    after = served(ev, q_eval)
+    value = after["overall"]["coverage_clipped"]
+    nominal = 1.0 - alpha
+    return {
+        "method": (
+            "split-conformal CQR: E = max(lo - y, y - hi) on raw out-of-fold quantile "
+            "predictions; Q = ceil((n+1)(1-alpha))-th smallest E; served bounds = "
+            "order_bounds(point, lo - Q, hi + Q) (clamp to [0, rul_cap], order around point)"
+        ),
+        "alpha": alpha,
+        "target": "capped RUL = min(true RUL, rul_cap), the quantile models' training target",
+        "also_reported": "coverage against unclipped true RUL (0 for true RUL > rul_cap)",
+        "caveat": CALIBRATION_CAVEAT,
+        "split": {
+            "seed": seed,
+            "n_calibration_engines": len(cal_units),
+            "n_evaluation_engines": len(eval_units),
+            "n_calibration_rows": int(cal.sum()),
+            "n_evaluation_rows": int(ev.sum()),
+            "calibration_units": cal_units,
+        },
+        "q_eval": q_eval,
+        "evaluation_half": {"before": served(ev, None), "after": after},
+        "q_final": q_final,
+        "n_final_rows": int(len(units)),
+        "cv_oof_after_q_final_in_sample": served(everything, q_final),
+        "acceptance": {
+            "criterion": (
+                f"evaluation-half coverage (capped target) within {nominal:.2f} ± "
+                f"{FR020_TOLERANCE:.2f}"
+            ),
+            "value": value,
+            "met": bool(abs(value - nominal) <= FR020_TOLERANCE + 1e-12),
+        },
+    }
 
 
 def _format_table(title: str, summary: dict[str, Any]) -> list[str]:
@@ -180,9 +288,14 @@ def run_interval_training(
         oof_point[val_idx] = predict_from_features(p, val_rows, rul_cap)
         oof_lo[val_idx] = lo.predict(val_rows)
         oof_hi[val_idx] = hi.predict(val_rows)
+    raw_lo, raw_hi = oof_lo.copy(), oof_hi.copy()
     oof_lo, oof_hi, oof_reordered = order_bounds(oof_point, oof_lo, oof_hi, rul_cap)
     cv_summary = summarize_intervals(raw, oof_lo, oof_hi, rul_cap, oof_reordered)
     cv_seconds = time.perf_counter() - cv_started
+    calibration = calibrate(
+        train["unit"].to_numpy(), y, raw, oof_point, raw_lo, raw_hi, rul_cap, seed
+    )
+    q_final = calibration["q_final"]
 
     fit_started = time.perf_counter()
     lower = make_quantile_model(columns, seed, params, QUANTILES[0]).fit(train, y)
@@ -192,15 +305,22 @@ def run_interval_training(
     last = last_rows(build_features(data.test, sensors, window))
     truth = data.rul[RUL_COLUMN].to_numpy(dtype=float)
     test_point = predict_from_features(point.pipeline, last, rul_cap)
-    test_lo, test_hi, test_reordered = order_bounds(
-        test_point, lower.predict(last), upper.predict(last), rul_cap
-    )
+    test_raw_lo, test_raw_hi = lower.predict(last), upper.predict(last)
+    test_lo, test_hi, test_reordered = order_bounds(test_point, test_raw_lo, test_raw_hi, rul_cap)
     test_summary = summarize_intervals(truth, test_lo, test_hi, rul_cap, test_reordered)
+    cal_lo, cal_hi, cal_reordered = order_bounds(
+        test_point, test_raw_lo, test_raw_hi, rul_cap, q_final
+    )
+    calibration["test"] = {
+        "before": test_summary,
+        "after": summarize_intervals(truth, cal_lo, cal_hi, rul_cap, cal_reordered),
+    }
 
     for line in _format_table(f"{n_splits}-fold GroupKFold out-of-fold", cv_summary):
         echo(line)
     for line in _format_table("Official test set (last cycle)", test_summary):
         echo(line)
+    _echo_calibration(echo, calibration)
     echo(
         f"Timings: CV {cv_seconds:.1f} s (3 models x {n_splits} folds), "
         f"final fit {fit_seconds:.1f} s (2 quantile models)"
@@ -232,9 +352,14 @@ def run_interval_training(
         "required_sensors": sensors,
         "feature_names": columns,
         "post_processing": (
-            "clamp to [0, rul_cap]; lower=min(lower, point); upper=max(upper, point)"
+            "lower -= conformal_q, upper += conformal_q (ADR-037); clamp to [0, rul_cap]; "
+            "lower=min(lower, point); upper=max(upper, point)"
         ),
+        "conformal_q": q_final,
+        "alpha": ALPHA,
+        # "evaluation" = uncalibrated (v1.1, M8) bounds; "calibration" = CQR results (M10).
         "evaluation": {"cv_oof": cv_summary, "test": test_summary},
+        "calibration": calibration,
         "timings_seconds": {"cv": round(cv_seconds, 1), "final_fit": round(fit_seconds, 1)},
     }
     pipelines = {"lower": lower, "upper": upper}
@@ -246,3 +371,38 @@ def run_interval_training(
     echo(f"Saved {model_path}, {metadata_path}, {report_path}")
     echo(f"Elapsed: {time.perf_counter() - started:.1f} s")
     return metadata
+
+
+def _echo_calibration(echo: Echo, cal: dict[str, Any]) -> None:
+    split = cal["split"]
+    echo(
+        f"Conformal calibration (CQR, alpha={cal['alpha']}, target = capped RUL): engines split "
+        f"seed {split['seed']}: {split['n_calibration_engines']} calibration "
+        f"({split['n_calibration_rows']:,} rows) / {split['n_evaluation_engines']} evaluation "
+        f"({split['n_evaluation_rows']:,} rows)"
+    )
+    echo(f"Q_eval (calibration half) = {cal['q_eval']:.4f}")
+    for line in _format_table("Evaluation half, BEFORE (v1.1)", cal["evaluation_half"]["before"]):
+        echo(line)
+    for line in _format_table(
+        f"Evaluation half, AFTER (Q_eval={cal['q_eval']:.4f})", cal["evaluation_half"]["after"]
+    ):
+        echo(line)
+    echo(f"Q_final (all {cal['n_final_rows']:,} out-of-fold rows; shipped) = {cal['q_final']:.4f}")
+    for line in _format_table(
+        "All OOF rows AFTER Q_final (in-sample for Q, not held out)",
+        cal["cv_oof_after_q_final_in_sample"],
+    ):
+        echo(line)
+    for line in _format_table("Official test BEFORE (v1.1)", cal["test"]["before"]):
+        echo(line)
+    for line in _format_table(
+        f"Official test AFTER (Q_final={cal['q_final']:.4f})", cal["test"]["after"]
+    ):
+        echo(line)
+    acc = cal["acceptance"]
+    echo(
+        f"FR-020 ({acc['criterion']}): value {acc['value']:.4f} → "
+        f"{'MET' if acc['met'] else 'NOT MET'}"
+    )
+    echo(f"Caveat: {cal['caveat']}")

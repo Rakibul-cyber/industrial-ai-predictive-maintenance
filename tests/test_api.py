@@ -121,6 +121,7 @@ def test_predict_matches_predict_rul(
         "rul_lower": round(direct.rul_lower, 2),
         "rul_upper": round(direct.rul_upper, 2),
         "interval_level": 0.8,
+        "interval_calibrated": True,
     }
     assert 0 <= body["predicted_rul"] <= 125
 
@@ -490,3 +491,40 @@ def test_anomaly_unavailable_keeps_predict_working(
     assert any("Anomaly detector" in r.getMessage() for r in caplog.records)
     if variant == "mismatch":
         assert "19990101" in error["message"]
+
+
+# --- calibrated intervals (ADR-037, M10) ----------------------------------------------------
+def test_model_info_reports_calibration(client: TestClient, served_model_dir: Path) -> None:
+    meta = json.loads((served_model_dir / "models" / "model_intervals_metadata.json").read_text())
+    info = client.get("/model/info").json()["intervals"]
+    assert info["calibrated"] is True
+    assert info["conformal_q"] == meta["conformal_q"] and info["alpha"] == 0.2
+    cal = info["calibration"]
+    assert cal["q_eval"] == meta["calibration"]["q_eval"]
+    assert cal["acceptance_met"] is meta["calibration"]["acceptance"]["met"]
+    after = meta["calibration"]["evaluation_half"]["after"]["overall"]
+    assert cal["evaluation_half_after"]["coverage_clipped"] == after["coverage_clipped"]
+    assert cal["test_after"] == meta["calibration"]["test"]["after"]["overall"]
+    assert "exchangeable" in cal["caveat"]
+    assert info["cv_oof"] == meta["evaluation"]["cv_oof"]["overall"]  # v1.1 numbers kept
+
+
+def test_uncalibrated_interval_metadata_serves_v1_1_bounds(
+    served_model_dir: Path, tmp_path: Path, client: TestClient, payload: dict[str, Any]
+) -> None:
+    calibrated = client.post("/predict", json=payload).json()
+    models = tmp_path / "models"
+    shutil.copytree(served_model_dir / "models", models)
+    meta_path = models / "model_intervals_metadata.json"
+    meta = json.loads(meta_path.read_text())
+    for key in ("conformal_q", "alpha", "calibration"):
+        del meta[key]
+    meta_path.write_text(json.dumps(meta))
+    clear_model_cache()
+    with TestClient(create_app(model_path=models / "model.joblib")) as old:
+        body = old.post("/predict", json=payload).json()
+        info = old.get("/model/info").json()["intervals"]
+    assert body["interval_calibrated"] is False
+    assert body["predicted_rul"] == calibrated["predicted_rul"]
+    assert info["calibrated"] is False and info["conformal_q"] is None
+    assert info["calibration"] is None

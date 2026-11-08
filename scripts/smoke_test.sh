@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Docker smoke test (docs/09, M6/M8/M9): build the image, start compose, wait for both
+# Docker smoke test (docs/09, M6/M8/M9/M10): build the image, start compose, wait for both
 # healthchecks, check /health (model + intervals + anomaly loaded), POST the late-life example and
-# assert its recorded critical result and rul_lower <= predicted_rul <= rul_upper (ADR-034),
+# assert its recorded critical result, rul_lower <= predicted_rul <= rul_upper (ADR-034) and
+# interval_calibrated (ADR-037),
 # POST both examples to /anomaly and assert the late one is anomalous and scores above engine 1
 # (ADR-035), check the dashboard health endpoint, tear down. Exits non-zero on any failure.
 #
@@ -66,8 +67,9 @@ got = json.loads(sys.argv[1])
 expected = json.load(open("examples/expected_predictions.json"))["predict_request_late.json"]
 assert got["health_status"] == "critical", got
 assert got["rul_lower"] <= got["predicted_rul"] <= got["rul_upper"], got
+assert got["interval_calibrated"] is True, got
 keys = ("predicted_rul", "health_status", "cycles_received", "last_cycle", "model_version")
-for key in (*keys, "rul_lower", "rul_upper", "interval_level"):
+for key in (*keys, "rul_lower", "rul_upper", "interval_level", "interval_calibrated"):
     assert got[key] == expected[key], (key, got[key], expected[key])
 PY
 

@@ -177,3 +177,11 @@ def anomaly_series_frame(body: Mapping[str, Any] | None) -> pd.DataFrame | None:
     if not series:
         return None
     return pd.DataFrame(series, columns=["cycle", "normalized_score"])
+
+
+def band_caption(intervals: Mapping[str, Any] | None) -> str:
+    """Trajectory band caption; names the conformal correction Q when the API reports one."""
+    q = (intervals or {}).get("conformal_q")
+    if (intervals or {}).get("calibrated") and q is not None:
+        return f"Shaded: 80 % prediction interval (conformally calibrated, Q = {q:.2f}). "
+    return "Shaded: 80 % prediction interval. "

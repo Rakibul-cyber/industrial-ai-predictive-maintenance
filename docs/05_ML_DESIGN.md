@@ -171,7 +171,7 @@ clear_model_cache() -> None
 predict_rul(cycles: pd.DataFrame | Sequence[Mapping], model: LoadedModel,
             intervals: IntervalModel | None = None) -> PredictionResult
 load_interval_model(path: Path | None = None) -> IntervalModel   # default: next to $MODEL_PATH (M8)
-order_bounds(point, lower, upper, rul_cap) -> (lower, upper, n_reordered)
+order_bounds(point, lower, upper, rul_cap, conformal_q=None) -> (lower, upper, n_reordered)  # Q applied first (M10)
 load_anomaly_model(path: Path | None = None) -> AnomalyModel     # default: next to $MODEL_PATH (M9)
 score_anomaly(cycles, model: LoadedModel, anomaly: AnomalyModel,
               include_series: bool = False) -> AnomalyResult    # M9, ADR-035
@@ -184,7 +184,7 @@ predict_from_features(pipeline, features, rul_cap) -> np.ndarray   # shared clam
 - Checks, in order: ≥ `window_size` records (`InsufficientHistoryError`); `cycle` and required sensors present and non-null (`MissingColumnsError`, with `.columns`); values finite and cycles positive integers (`InvalidValuesError`); cycles strictly increasing by exactly 1 as given (`NonConsecutiveCyclesError` — covers out-of-order, duplicates, gaps). All except `ModelNotAvailableError` subclass `InputContractError(ValueError)`. HTTP mapping is in 06 §6.
 - Only the **last `window_size` records** are used. They pass through the shared `features.build.build_features` to produce one feature row; extra older history cannot change the result (tested).
 - `PredictionResult`: `predicted_rul` (float, clamped to `[0, rul_cap]`, ADR-027), `health_status` (ADR-025), `cycles_received`, `cycles_used` (= `window_size`), `last_cycle`, `model_version`, `warnings` (`OUT_OF_TRAINING_RANGE` messages for required sensors in the used window).
-- **Intervals (M8, ADR-034):** with a matching `IntervalModel` (`for_model_version` == served `model_version` and identical `feature_names`), `PredictionResult` also carries `rul_lower`, `rul_upper` (clamped to [0, `rul_cap`], ordered around the point) and `interval_level` (0.8). Without one, or on a mismatch (logged warning), these are `None`. The point prediction is byte-identical in all cases (tested).
+- **Intervals (M8, ADR-034):** with a matching `IntervalModel` (`for_model_version` == served `model_version` and identical `feature_names`), `PredictionResult` also carries `rul_lower`, `rul_upper` (clamped to [0, `rul_cap`], ordered around the point) and `interval_level` (0.8). Since M10 the raw quantile predictions are first widened by the metadata's `conformal_q` (CQR, ADR-037) inside `order_bounds`, and `interval_calibrated` reports whether Q was applied (metadata without Q → v1.1 bounds, `false`). Without an interval model, or on a mismatch (logged warning), these fields are `None`. The point prediction is byte-identical in all cases (tested).
 - **Anomaly score (M9, ADR-035):** `score_anomaly` runs the **same validation function** as `predict_rul` (identical exceptions and messages, tested), builds features over the whole validated request and scores every full-window row with the detector. `AnomalyResult`: `anomaly_score` (Mahalanobis distance of the last row), `normalized_score` (= score / threshold), `threshold`, `is_anomalous` (normalised > 1), `last_cycle`, `cycles_received`, `model_version`, and optional `series` (`cycles_received − window_size + 1` entries). A detector whose `for_model_version` differs from the served model, or whose features the served model does not produce, raises `AnomalyNotAvailableError`. The point model and interval code paths are not touched.
 - Health status (ADR-025, `config.HEALTH_BANDS`): `critical` if RUL < 20; `warning` if 20 ≤ RUL < 60; `healthy` if RUL ≥ 60.
 - The offline test evaluation and `predict_rul` produce bit-identical predictions (contract test; real-data test recomputes the served model's test RMSE through `predict_rul`).
@@ -199,6 +199,16 @@ Two `HistGradientBoostingRegressor(loss="quantile")` models (q = 0.1, 0.9 → no
 | Official test, last cycle (100 engines) | 0.740 | 0.820 | 42.1 | 8 |
 
 Coverage for true RUL > 125 is 0 against unclipped truth by construction (cap); bucket tables and interpretation in [16 §9](16_EVALUATION_REPORT.md). Source: `reports/metrics_intervals.json`.
+
+**Conformal calibration (M10, ADR-037), measured 2026-11-08T20:37:53Z.** Split-conformal CQR on the same out-of-fold predictions, α = 0.2, target = capped RUL. E = max(lo − y, y − hi) on raw bounds; Q = ⌈(n+1)(1−α)⌉-th smallest E. Engines split at random (seed 42) into 50 calibration / 50 evaluation engines. No model was retrained; `model_intervals.joblib` is byte-identical.
+
+| | Q | Coverage (clipped) | Coverage (unclipped) | Mean width |
+|---|---|---|---|---|
+| Evaluation half (8,921 rows), before | — | 0.734 | 0.504 | 37.2 |
+| Evaluation half, after (**FR-020**) | Q_eval 1.320 | **0.777** | 0.536 | 39.2 |
+| Official test, before → after | Q_final 1.742 (shipped) | 0.820 → 0.850 | 0.740 → 0.750 | 42.1 → 44.7 |
+
+FR-020 (0.80 ± 0.03) is **met at the lower edge**. Rows of one engine are correlated, so the conformal guarantee is approximate (16 §9d).
 
 ### 10b. Anomaly detection (M9, ADR-035) — measured 2026-11-08T19:33:06Z
 
@@ -221,6 +231,6 @@ Full tables and what the evaluation does and does not prove: [16 §10](16_EVALUA
 - Predictions are clamped to `rul_cap` (125); true test RULs up to 145 are under-predicted by design.
 - The primary configuration was chosen by CV on the training set only, and selection is by CV, so the official test set stays a held-out report. The 12-configuration search still slightly favours the primary's CV estimate (best-of-12); its test RMSE (16.610) is close to its CV RMSE (16.559).
 - Rolling features need ≥ 30 cycles of history; younger engines cannot be scored.
-- Uncertainty: the M8 80 % intervals are below nominal coverage out-of-fold and cannot cover true RUL > 125; health bands are illustrative thresholds, not engineering limits.
+- Uncertainty: the 80 % intervals are conformally calibrated since M10 (held-out-engine coverage 0.777 against the capped target, still slightly below nominal; per-bucket coverage uneven, 21–60 at 0.687) and cannot cover true RUL > 125; health bands are illustrative thresholds, not engineering limits.
 - The M9 anomaly score is unsupervised: it measures distance from a population healthy reference, has no fault labels to validate against, and missed its trend target (0.680 ≤ 0.7).
 - joblib artifacts are tied to the scikit-learn version (mismatch warning, 02 §7).

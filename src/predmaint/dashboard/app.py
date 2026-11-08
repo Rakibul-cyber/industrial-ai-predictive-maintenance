@@ -19,6 +19,7 @@ from predmaint.dashboard.helpers import (
     TrajectoryError,
     anomaly_badge,
     anomaly_series_frame,
+    band_caption,
     compute_trajectory,
     engine_history,
     engine_payload,
@@ -266,7 +267,7 @@ with trajectory_tab:
                     width="stretch",
                 )
                 st.caption(
-                    ("Shaded: 80 % prediction interval. " if band is not None else "")
+                    (band_caption(model_meta.get("intervals")) if band is not None else "")
                     + f"true_rul_capped = min(true RUL, {RUL_CAP}), the training target. Dashed: "
                     f"health bands (critical < {bands['critical_below']}, "
                     f"warning < {bands['warning_below']})."

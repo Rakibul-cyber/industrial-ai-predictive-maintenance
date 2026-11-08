@@ -101,6 +101,7 @@ class PredictionResult:
     rul_lower: float | None = None
     rul_upper: float | None = None
     interval_level: float | None = None
+    interval_calibrated: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -119,18 +120,37 @@ class IntervalModel:
     def level(self) -> float:
         return float(self.metadata["interval_level"])
 
+    @property
+    def conformal_q(self) -> float | None:
+        """CQR correction Q (ADR-037), or ``None`` for uncalibrated (M8 / v1.1) metadata."""
+        q = self.metadata.get("conformal_q")
+        return None if q is None else float(q)
+
+    @property
+    def calibrated(self) -> bool:
+        return self.conformal_q is not None
+
 
 def order_bounds(
-    point: np.ndarray, lower: np.ndarray, upper: np.ndarray, rul_cap: int | None
+    point: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    rul_cap: int | None,
+    conformal_q: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, int]:
-    """Clamp bounds to ``[0, rul_cap]`` and enforce ``lower <= point <= upper`` (ADR-034).
+    """Turn raw quantile predictions into served bounds (ADR-034, ADR-037).
+
+    With ``conformal_q`` (CQR correction Q) the raw bounds become ``[lower - Q, upper + Q]``
+    first; ``None`` means uncalibrated (v1.1). Then both bounds are clamped to
+    ``[0, rul_cap]`` and ``lower <= point <= upper`` is enforced.
 
     Returns ``(lower, upper, n_reordered)`` where ``n_reordered`` counts predictions whose
     clamped bound had to move to the point (incl. quantile crossing).
     """
     cap = np.inf if rul_cap is None else float(rul_cap)
-    lo = np.clip(np.asarray(lower, dtype=float), 0.0, cap)
-    hi = np.clip(np.asarray(upper, dtype=float), 0.0, cap)
+    q = 0.0 if conformal_q is None else float(conformal_q)
+    lo = np.clip(np.asarray(lower, dtype=float) - q, 0.0, cap)
+    hi = np.clip(np.asarray(upper, dtype=float) + q, 0.0, cap)
     point = np.asarray(point, dtype=float)
     ordered_lo, ordered_hi = np.minimum(lo, point), np.maximum(hi, point)
     n_reordered = int(np.sum((ordered_lo != lo) | (ordered_hi != hi)))
@@ -394,7 +414,8 @@ def predict_rul(
 
     Only the last ``window_size`` cycles are used, to build a single feature row with the
     shared feature function. Extra columns are ignored. With a matching ``intervals`` model the
-    result also carries ``rul_lower``/``rul_upper``/``interval_level``; without one, or on a
+    result also carries ``rul_lower``/``rul_upper``/``interval_level``/``interval_calibrated``
+    (CQR-corrected when the interval metadata holds ``conformal_q``, ADR-037); without one, or on a
     version mismatch (logged as a warning), those fields are ``None``. The point prediction is
     identical in every case.
 
@@ -412,7 +433,7 @@ def predict_rul(
     predicted = float(predict_from_features(model.pipeline, features, model.rul_cap)[0])
     if not math.isfinite(predicted):
         raise InvalidValuesError("model produced a non-finite prediction")
-    rul_lower = rul_upper = level = None
+    rul_lower = rul_upper = level = calibrated = None
     if intervals is not None:
         reason = interval_mismatch(intervals, model)
         if reason is not None:
@@ -423,8 +444,10 @@ def predict_rul(
                 intervals.lower.predict(features),
                 intervals.upper.predict(features),
                 model.rul_cap,
+                intervals.conformal_q,
             )
             rul_lower, rul_upper, level = float(lo[0]), float(hi[0]), intervals.level
+            calibrated = intervals.calibrated
     return PredictionResult(
         predicted_rul=predicted,
         health_status=health_status(predicted),
@@ -436,6 +459,7 @@ def predict_rul(
         rul_lower=rul_lower,
         rul_upper=rul_upper,
         interval_level=level,
+        interval_calibrated=calibrated,
     )
 
 
