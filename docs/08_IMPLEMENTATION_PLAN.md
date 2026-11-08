@@ -348,6 +348,35 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** FR-021 measured and stated (met or not met); detector parameters identical to M9; point and interval artifacts byte-identical; all tests pass with the 85 % gate; smoke test asserts `smoothed: true` and engine 34 anomalous.
 - **Estimated effort:** 3 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting review). FR-021 **NOT MET** (smoothed trend 0.693 ≤ 0.7); title unchanged. Evidence in 14.
 
+## M12 — Feature importance and model card (post-MVP extension, CR-013 / ADR-040)
+
+- **Objective:** explain which inputs the served model relies on (permutation importance, two populations, Ridge comparison) and publish a model card whose numbers all trace to committed files.
+- **Dependencies:** M11 (committed `0ab2bb2`, CI run 42534959808 green).
+- **Requirements:** FR-022.
+- **Files to create:** `src/predmaint/models/explain.py`, `reports/feature_importance.json`, `models/model_feature_importance.json`, `docs/18_MODEL_CARD.md`, `tests/test_explain.py`.
+- **Files to modify:** `src/predmaint/__init__.py` (0.6.0), `models/train.py` (CLI `--explain`), `models/predict.py` (loader), `api/{schemas,service}.py`, `dashboard/{helpers,app}.py`, `scripts/train.py` (usage), `scripts/smoke_test.sh`, `Dockerfile`, tests (`conftest` fixture runs the explain step), README, CLAUDE.md, docs.
+- **Tasks:**
+  - [x] M12-T1 Change control first: CR-013, ADR-040, FR-022, doc 00 scope, this plan.
+  - [x] M12-T2 `models/explain.py` (sensor/type mapping, served-RMSE scorer, `population_importance`, `aggregate`, Ridge view, `run_explanation`); `scripts/train.py --explain` (refuses without `models/model_metadata.json`).
+  - [x] M12-T3 Outputs: `reports/feature_importance.json` + identical `models/model_feature_importance.json`; Dockerfile copies the latter.
+  - [x] M12-T4 API 0.6.0: `/model/info.feature_importance` (test population, top 10 features, 14 sensors); null + warning when absent, unreadable or mismatched.
+  - [x] M12-T5 Dashboard: per-sensor bar chart with ±1 std rules and a caveat line (`helpers.importance_chart_frame`).
+  - [x] M12-T6 `docs/18_MODEL_CARD.md`, generated from committed files, every numeric table cites its source.
+  - [x] M12-T7 Tests (`test_explain`, `test_model_card`, API, dashboard, real data); smoke test checks the importance block in the image.
+- **Verification commands:**
+
+  ```bash
+  ruff check . && ruff format --check .
+  pytest -q
+  shasum -a 256 models/model.joblib models/model_intervals.joblib models/model_anomaly.joblib   # before and after
+  python scripts/train.py --explain
+  API_PORT=8001 python -m predmaint.api.main &   # curl /model/info (feature_importance block)
+  bash scripts/smoke_test.sh; echo $?
+  ```
+
+- **Acceptance criteria:** FR-022 met with evidence; all model artifacts byte-identical; all tests pass with the 85 % gate; smoke test passes.
+- **Estimated effort:** 3 h · **Status:** **COMPLETE** (2026-11-09; uncommitted, awaiting review). FR-022 met. Evidence in 14.
+
 ## Requirement → milestone traceability
 
 | Milestone | Requirements |
@@ -363,3 +392,4 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 | M9 | FR-019 |
 | M10 | FR-020 |
 | M11 | FR-021 |
+| M12 | FR-022 |

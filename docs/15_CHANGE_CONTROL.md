@@ -182,3 +182,15 @@ Append to the "Change records" section below **before** implementing, and get us
 | Approval | Authorized by the user on 2026-11-08 (M11 authorization). |
 
 **CR-012 outcome (2026-11-09, M11 close-out):** FR-021 **not met** (smoothed trend median 0.693 ≤ 0.7; false-alarm 0.0101 met). Smoothing also degraded detection (never flagged 2 % → 16 %, median detection RUL 49 → 44). Decision ADR-039: serve the raw score (`smoothing_enabled: false` in the anomaly metadata); smoothing implementation, smoothed threshold and evaluation retained as a disabled, documented experiment. CI checkout fetches full history (`fetch-depth: 0`) so the M9-artifact comparison test runs there. Title unchanged (ADR-033 stands).
+
+### CR-013 — Feature importance and model card (post-MVP extension, Milestone 12) (2026-11-09)
+
+| Field | Content |
+|---|---|
+| Reason | Approved scope extension (§1.4), authorized by the user on 2026-11-09: explainability and a model card. No model behaviour changes. |
+| Evidence | M12 authorization. The served HistGradientBoostingRegressor has no native `feature_importances_`; 16 lists no explainability analysis. |
+| Impact | New module `models/explain.py` and CLI action `scripts/train.py --explain`. New committed outputs: `reports/feature_importance.json`, plus an identical copy `models/model_feature_importance.json` next to the served model so the API can read it inside the image (the image excludes `reports/`). `Dockerfile` copies it. `/model/info.feature_importance` (additive), `api_version` 0.6.0. Dashboard model-info bar chart. New doc `docs/18_MODEL_CARD.md`. No model, metadata or prediction changes; no new dependency. |
+| Smallest fix | `sklearn.inspection.permutation_importance` on the served Pipeline (no refit) for two populations; the Ridge baseline's standardized coefficients as a second view (ADR-040). |
+| Affected docs | 00, 01, 02, 05, 06, 07, 08, 09, 10, 11, 13, 14, 15, 16, 17, 18 (new), README, CLAUDE.md. |
+| Regression tests | Synthetic importance ranking; aggregation hand sums; feature-type coverage; refusal without model metadata; JSON keys and model_version; API schema; dashboard helper and AppTest with/without the field; real-data reproduction of the top-5 sensors; model-card source-file check. |
+| Approval | Authorized by the user on 2026-11-09 (M12 authorization). |

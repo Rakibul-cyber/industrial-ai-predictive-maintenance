@@ -559,3 +559,41 @@ def test_model_info_reports_both_anomaly_evaluations(
     assert info["evaluation_smoothed"] == meta["smoothed"]["evaluation"]
     expected = meta["smoothed"]["evaluation"]["acceptance"]["met"]
     assert info["smoothed_acceptance_met"] is expected
+
+
+# --- feature importance (ADR-040, M12) ------------------------------------------------------
+def test_model_info_feature_importance(client: TestClient, served_model_dir: Path) -> None:
+    report = json.loads((served_model_dir / "models" / "model_feature_importance.json").read_text())
+    fi = client.get("/model/info").json()["feature_importance"]
+    test = report["populations"]["test"]
+    assert fi["population"].startswith("test") and fi["n_rows"] == test["n_rows"]
+    assert (fi["n_repeats"], fi["seed"]) == (report["n_repeats"], report["seed"])
+    assert fi["baseline_rmse"] == test["baseline_rmse"]
+    assert len(fi["top_features"]) == 10
+    assert set(fi["top_features"][0]) == {"name", "mean", "std"}
+    assert [r["name"] for r in fi["top_features"]] == [r["name"] for r in test["per_feature"][:10]]
+    assert [r["name"] for r in fi["per_sensor"]] == [r["name"] for r in test["per_sensor"]]
+    assert fi["caveat"] == test["caveat"]
+
+
+@pytest.mark.parametrize("variant", ["absent", "mismatch", "corrupt"])
+def test_feature_importance_unavailable_is_null(
+    served_model_dir: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture, variant: str
+) -> None:
+    models = tmp_path / "models"
+    shutil.copytree(served_model_dir / "models", models)
+    path = models / "model_feature_importance.json"
+    if variant == "absent":
+        path.unlink()
+    elif variant == "mismatch":
+        path.write_text(json.dumps({**json.loads(path.read_text()), "for_model_version": "old"}))
+    else:
+        path.write_text("{not json")
+    clear_model_cache()
+    with (
+        caplog.at_level(logging.WARNING, logger="predmaint.api"),
+        TestClient(create_app(model_path=models / "model.joblib")) as other,
+    ):
+        info = other.get("/model/info")
+    assert info.status_code == 200 and info.json()["feature_importance"] is None
+    assert any("Feature importance" in r.getMessage() for r in caplog.records)

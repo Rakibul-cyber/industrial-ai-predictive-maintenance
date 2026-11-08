@@ -54,6 +54,7 @@ python scripts/train.py --model primary    # HistGradientBoosting: 12-config CV 
 python scripts/train.py --select           # promote the lower-CV-RMSE model → models/model.joblib, model_metadata.json
 python scripts/train.py --model intervals  # q0.1/q0.9 interval models for the served model → models/model_intervals.*
 python scripts/train.py --model anomaly    # anomaly detector for the served model (~2 s) → models/model_anomaly.*
+python scripts/train.py --explain          # permutation feature importance (~15 s) → reports/feature_importance.json
 # the served model_version embeds the git SHA, so refresh the recorded demo expectations:
 python scripts/make_request_payload.py --unit 1 --out examples/predict_request.json --expected examples/expected_predictions.json
 python scripts/make_request_payload.py --unit 1 --last 30 --out examples/predict_request_min.json --expected examples/expected_predictions.json
@@ -143,6 +144,10 @@ Smoothing barely moved the trend and made detection later and less complete. On 
 
 Test = official FD001 test set, last observed cycle of each of 100 engines, unclipped truth; RUL capped at 125 for training and predictions. CV and test rankings agree (`rankings_agree: true`). Full protocol, search grid, residuals by RUL range and limitations: **[docs/16_EVALUATION_REPORT.md](docs/16_EVALUATION_REPORT.md)**.
 
+## What drives the predictions
+
+The served model's reliance on each sensor was measured by permutation importance: the increase in test RMSE, in cycles, when one sensor's raw, mean and std columns are shuffled (10 repeats; no refit). On the 100 official test engines the top five sensors are `s_14` (+2.53 ± 0.84), `s_3` (+1.88 ± 0.62), `s_11` (+1.80 ± 0.60), `s_13` (+1.38 ± 0.41), `s_2` (+1.13 ± 0.51). On the 17,731 training rows the top five are `s_3`, `s_14`, `s_2`, `s_9`, `s_11`, so `s_3` and `s_14` lead in both. Rolling means and stds matter more than raw readings, and `cycle` (engine age) is the single most important feature on the test set. Below the top few sensors the test ranking is within noise. A Ridge baseline ranks sensors very differently (Spearman 0.23 train / 0.06 test), and none of this is causal. Details: [evaluation report §11](docs/16_EVALUATION_REPORT.md), [`reports/feature_importance.json`](reports/feature_importance.json); every metric, artifact hash and limitation in one place: **[model card](docs/18_MODEL_CARD.md)**.
+
 ## Repository structure
 
 ```
@@ -150,8 +155,8 @@ src/predmaint/       data/ (download, load, validate, labels) · features/ · mo
                      metrics, artifacts, selection, intervals, anomaly, predict) · api/ (FastAPI) · dashboard/ (Streamlit)
 scripts/             download_data.py · train.py · make_request_payload.py · smoke_test.sh
 tests/               unit, contract, API, dashboard (AppTest), real-data, Docker smoke
-models/              model.joblib + model_metadata.json (served model), model_intervals.* (80 % intervals), model_anomaly.* (anomaly detector), committed
-reports/             metrics per model, model comparison, residuals by RUL bucket
+models/              model.joblib + model_metadata.json (served model), model_intervals.* (80 % intervals), model_anomaly.* (anomaly detector), model_feature_importance.json, committed
+reports/             metrics per model, model comparison, residuals by RUL bucket, intervals, anomaly, feature importance
 examples/            demo requests (FD001 test engines 1 and 34) + expected predictions
 docs/                00–17: charter, requirements, architecture, …, decision log, evaluation report
 Dockerfile · docker-compose.yml · .github/workflows/ci.yml
@@ -161,7 +166,7 @@ Full tree with one line per file: [docs/07_REPOSITORY_STRUCTURE.md](docs/07_REPO
 
 ## Testing and CI
 
-- **pytest:** 285 tests pass locally (2 opt-in tests skipped). Line coverage 96.39 %, enforced at **85 %** in `pyproject.toml`.
+- **pytest:** 305 tests pass locally (2 opt-in tests skipped). Line coverage 97.31 %, enforced at **85 %** in `pyproject.toml`.
 - **Markers:** `data` (runs when FD001 is present), `network` (`RUN_NETWORK_TESTS=1`), `docker` (`RUN_DOCKER_TESTS=1`).
 - **Kinds of test:** leakage tests (disjoint engine folds, causal features), an inference contract test (API output == offline prediction), the committed-artifact check (scikit-learn version pin, recorded predictions), and real-data tests that recompute the served model's test RMSE.
 - **CI** (GitHub Actions, `ubuntu-24.04`): `lint-test` (ruff + pytest with the coverage gate) and `docker` (`scripts/smoke_test.sh`: build, compose up, both healthchecks, a `/predict` on the late-life example incl. `rul_lower ≤ predicted_rul ≤ rul_upper` and `interval_calibrated`, `/anomaly` on both examples (raw score served, late one anomalous at 1.1015, engine 1 scoring lower), teardown).
@@ -178,7 +183,7 @@ Full tree with one line per file: [docs/07_REPOSITORY_STRUCTURE.md](docs/07_REPO
 
 - **Anomaly score evaluated without labels, and the miss reported.** The threshold comes from out-of-fold healthy scores, the evaluation asks whether the score tracks degradation, and the 0.7 trend target was fixed in advance. It came in at 0.680. One pre-registered remedy (smoothing, M11) reached 0.693 and made detection worse, so it was rejected and the raw score is served. Both were reported, and nothing was tuned. [ADR-035](docs/13_DECISION_LOG.md#adr-035--minimal-anomaly-detection-mahalanobis-distance-to-a-healthy-reference-milestone-9)
 
-All 38 decisions (ADR-036 unused): [docs/13_DECISION_LOG.md](docs/13_DECISION_LOG.md).
+All 39 decisions (ADR-036 unused): [docs/13_DECISION_LOG.md](docs/13_DECISION_LOG.md).
 
 ## Limitations and future work
 

@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **MVP COMPLETE** (M0–M7) + M8 (intervals, `a25df0e`) + M9 (anomaly, `1e728ca`; FR-019 not met) + M10 (CQR, `4734b37`; FR-020 met narrowly) + **Milestone 11 (smoothed anomaly score, CR-012) CLOSED** — FR-021 not met; remedy rejected, raw score served (ADR-039). Uncommitted, ready for commit. |
+| Current milestone | **MVP COMPLETE** (M0–M7) + M8 (intervals) + M9 (anomaly; FR-019 not met) + M10 (CQR; FR-020 met narrowly) + M11 (smoothing rejected, raw served; `0ab2bb2`) + **Milestone 12 (feature importance + model card, CR-013) COMPLETE** — uncommitted, awaiting review. FR-022 met. |
 | Last updated | 2026-11-09 |
-| Git ref | `main` = `origin/main` @ `4734b37` (M10, committed and pushed by the user; CI run 42522391649 green). M11 work is uncommitted. |
-| Next approved action | User commit of M11 + close-out: code, tests, `.github/workflows/ci.yml`, `models/model_anomaly_metadata.json`, `reports/metrics_anomaly.json`, `examples/expected_predictions.json`, docs (no `.joblib` changed). The push runs CI with `fetch-depth: 0` (the M9-artifact comparison test should then run, not skip) and the `docker` job with the `smoothed: false` assertion. Rebuild the demo stack with `--build`. Further work goes through 15. |
+| Git ref | `main` = `origin/main` @ `0ab2bb2` (M11 + close-out, committed and pushed by the user; CI run 42534959808 green: lint-test + docker). M12 work is uncommitted. |
+| Next approved action | User review and commit of M12: code, tests, `Dockerfile`, `scripts/smoke_test.sh`, `reports/feature_importance.json`, `models/model_feature_importance.json`, `docs/18_MODEL_CARD.md` and docs (no `.joblib` or model metadata changed). Decide whether the model-card generator should become committed code (it is a one-off script now). Rebuild the demo stack with `--build`. |
 
 ## Milestone tracker
 
@@ -22,7 +22,8 @@
 | M8 Prediction intervals (CR-008, ADR-034) | **COMPLETE** 2026-11-08; committed `a25df0e`, pushed; CI run 42514386686 green | M8 section below |
 | M9 Minimal anomaly detection (CR-010, ADR-035) | **COMPLETE** 2026-11-08; committed `1e728ca`, pushed; CI green; FR-019 trend target **not met** | M9 section below |
 | M10 CQR interval calibration (CR-011, ADR-037) | **COMPLETE** 2026-11-08; committed `4734b37`, pushed; CI green; FR-020 **met, narrowly** | M10 section below |
-| M11 Smoothed anomaly score (CR-012, ADR-038, ADR-039) | **CLOSED** 2026-11-09 (uncommitted, ready for commit); FR-021 **NOT MET**; remedy rejected, raw score served | M11 + close-out sections below |
+| M11 Smoothed anomaly score (CR-012, ADR-038, ADR-039) | **CLOSED** 2026-11-09; committed `0ab2bb2`, pushed; CI green; FR-021 **NOT MET**; remedy rejected, raw score served | M11 + close-out sections below |
+| M12 Feature importance + model card (CR-013, ADR-040) | **COMPLETE** 2026-11-09 (uncommitted, awaiting review); FR-022 met | M12 section below |
 
 ## M0 — what was verified (actual command results)
 
@@ -551,6 +552,76 @@ $ pytest -q -m data --no-cov → 13 passed · DATA_DIR=/nonexistent pytest -q �
 - The anomaly metadata records `git_dirty: true` (trained on the uncommitted M9 tree on top of `a25df0e`); its `model_version` is therefore `anomaly-20261108-a25df0e`.
 - Coverage of `src/predmaint`: 95.92 % (from 95.42 %); `models/anomaly.py` 99 %.
 
+## M12 — feature importance and model card (2026-11-09)
+
+**Start:** working tree clean; `main` = `origin/main` @ `0ab2bb2`; CI run 42534959808 on `0ab2bb2`: `completed / success`, jobs `lint-test` and `docker` both `success` (GitHub REST API).
+
+**CI `fetch-depth: 0` (M11 close-out change):**
+- **Verified:** the change is on `main`, and the `lint-test` job with that checkout succeeded.
+- **UNVERIFIED:** whether `test_anomaly_detector_parameters_identical_to_m9` actually *ran* rather than skipped. Job logs return HTTP 403 without authentication, and the step list does not show individual tests.
+
+**Change control first:** CR-013, ADR-040, FR-022, the M12 plan and doc 00 scope were written before any importance number was computed. The authorization called the baseline artifact "committed"; `models/baseline.joblib` is in fact a local, gitignored candidate. ADR-040 records this: the step uses it when present and trained on the same data hashes, otherwise it retrains the deterministic baseline into a temporary directory. That fallback is tested.
+
+```text
+$ shasum -a 256 models/model.joblib models/model_intervals.joblib models/model_anomaly.joblib      (before = after)
+39bfa6fd…28c1  model.joblib · 9c7cfc5e…6d12  model_intervals.joblib · 3f39354f…89b9  model_anomaly.joblib
+  (model_metadata.json, model_intervals_metadata.json, model_anomaly_metadata.json also OK)
+$ python scripts/train.py --explain
+Permutation importance for served model primary-20261108-f4c86df: 43 features, n_repeats=10, seed=42, n_jobs=-1, scoring = RMSE of served (clamped) predictions
+Baseline RMSE (served, clamped): train 9.533 (n=17,731, capped target) | test 16.610 (n=100, unclipped truth)
+Per sensor (RMSE increase in cycles, mean ± std over repeats):
+  rank train                     test
+  1    s_3      4.586 ± 0.045      s_14     2.534 ± 0.844
+  2    s_14     4.181 ± 0.044      s_3      1.884 ± 0.616
+  3    s_2      2.850 ± 0.037      s_11     1.801 ± 0.603
+  4    s_9      2.556 ± 0.026      s_13     1.382 ± 0.412
+  5    s_11     2.377 ± 0.026      s_2      1.135 ± 0.513
+  6    s_13     2.359 ± 0.028      s_7      1.097 ± 0.430
+  7    s_8      2.165 ± 0.034      s_4      0.956 ± 0.422
+  8    s_12     2.020 ± 0.040      s_8      0.699 ± 0.451
+  9    s_7      1.899 ± 0.032      s_21     0.384 ± 0.141
+  10   s_4      1.616 ± 0.027      s_17     0.199 ± 0.270
+  11   s_17     1.393 ± 0.016      s_9      0.164 ± 0.532
+  12   s_15     1.072 ± 0.015      s_20     0.131 ± 0.216
+  13   s_20     1.038 ± 0.018      s_12     0.125 ± 0.472
+  14   s_21     0.584 ± 0.012      s_15     0.030 ± 0.272
+Per feature type:
+  rolling mean  (n=14)  train  15.807 ± 0.092   test   5.868 ± 1.304
+  rolling std   (n=14)  train  12.043 ± 0.097   test   4.946 ± 1.143
+  cycle         (n= 1)  train   6.869 ± 0.055   test   2.991 ± 1.287
+  raw sensor    (n=14)  train   2.846 ± 0.055   test   1.707 ± 0.747
+Top 10 features (test population): cycle 2.991, s_14_roll_std 1.846, s_3_roll_mean 1.824, s_2_roll_mean 1.063, s_11_roll_std 0.961, s_11 0.717, s_13_roll_std 0.690, s_14_roll_mean 0.665, s_7_roll_std 0.583, s_13_roll_mean 0.577
+Ridge baseline ridge-20261108T150138Z (models/baseline.joblib): per-sensor |coef| order: s_13, s_8, s_9, s_7, s_14, s_15, s_4, s_2, s_12, s_11, s_17, s_20, s_21, s_3
+Spearman rank agreement (Ridge |coef| vs permutation, per sensor): train 0.226, test 0.059
+Timing: train population 11.9 s, test population 0.6 s, Ridge 0.0 s
+Saved reports/feature_importance.json and models/model_feature_importance.json (identical)
+Elapsed: 12.6 s     [time -p: real 14.74, user 74.28, sys 5.64]
+$ curl /model/info | feature_importance      (local API, port 8001; api_version 0.6.0)
+{"population": "test (official FD001 test set, last cycle of each engine)", "target": "unclipped true RUL (RUL_FD001), the official test metric", "n_rows": 100, "n_repeats": 10, "seed": 42, "baseline_rmse": 16.609852374016835,
+ "top_features": [{"name": "cycle", "mean": 2.991…, "std": 1.287…}, {"name": "s_14_roll_std", …}, {"name": "s_3_roll_mean", …}, … 10], "per_sensor": [{"name": "s_14", "mean": 2.534…, "std": 0.844…}, … 14],
+ "caveat": "out-of-sample but only 100 rows: noisy, see std across repeats", "computed_at": "2026-11-08T23:35:15Z"}
+$ bash scripts/smoke_test.sh; echo $?      (ports 18000/18501; demo stack not touched)
+  /health → {…"api_version":"0.6.0",…} · /predict and /anomaly as before · /model/info → feature_importance: top sensor s_14 n_repeats 10
+  SMOKE TEST PASSED (arm64) · exit code 0 · image content 243,214,112 bytes
+$ ruff check . → All checks passed!  ·  ruff format --check . → 74 files already formatted
+$ pytest -q → Required test coverage of 85% reached. Total coverage: 97.31% · 305 passed, 2 skipped
+$ pytest -q -m data --no-cov → 18 passed · DATA_DIR=/nonexistent pytest -q → 291 passed, 16 skipped; coverage 97.22%
+```
+
+**Findings:**
+
+- **Deterministic:** the first and final `--explain` runs printed identical numbers. The real-data test reproduces the test-population top-5 sensors and means with `n_jobs=1`, so the result does not depend on `n_jobs`. The test-population baseline RMSE equals the official test RMSE (16.610), a sanity check that the scorer reproduces the served output.
+- **Results:** `s_3` and `s_14` lead in both populations; rolling means > rolling stds > `cycle` > raw readings; `cycle` is the top single test feature. The test ranking below the top few sensors is within noise. Ridge disagrees strongly (Spearman 0.226 / 0.059). Summary in 16 §11; card in 18.
+- **Defects fixed within M12 (no contract affected):**
+  - The baseline-retrain fallback did not pass `expected` to `run_training`, so it validated synthetic data against FD001 figures. Found by the new test; fixed.
+  - `rank_agreement` raised scipy's `ConstantInputWarning` on the 4-engine synthetic fixture. It now returns `None` (undefined), and the console prints "undefined". Fixed in project code, no warning filter.
+- **Model card:**
+  - Generated from the committed files by a **one-off script that is not committed** (scratchpad). Committing it would put logic under `src/` and is left to the user (next action).
+  - `tests/test_model_card.py` checks that each of the card's numeric tables is followed by a `Source:` line naming existing files, and that the artifact-hash table matches the files. A rerun of `--explain` (new `computed_at`) therefore requires regenerating the card.
+  - While generating, one prose limitation I had drafted ("all predictions at the cap for true RUL > 125") contradicted the residual table (share at cap 0.000). It was corrected to "every such engine is under-predicted" before the card was written.
+- **Smoke test:** gained one check that `/model/info.feature_importance` is present inside the container. That is the only verification of the new `Dockerfile` copy line.
+- **Existing tests:** none changed. The shared `served_model_dir` fixture now also runs the explain step (`n_jobs=1`).
+
 ## M11 close-out — serve the raw score, smoothing retained as a disabled experiment (2026-11-09)
 
 **Decision:** ADR-039 supersedes ADR-038's serving clause. **Mechanism:** an explicit `smoothing_enabled: false` in `models/model_anomaly_metadata.json`, written by `scripts/train.py --model anomaly` (`SMOOTHING_ENABLED = False`). A flag is clearer than deleting keys because the smoothing config, smoothed threshold (5.0906) and smoothed evaluation stay in the metadata, the report and `/model/info.anomaly`. `AnomalyModel.smoothing_enabled` treats metadata with `smoothing` but no flag as enabled (M11 semantics) and metadata without `smoothing` as raw (M9).
@@ -732,3 +803,4 @@ The first trajectory and upload screenshots showed empty tabs, so the owner supp
 | **M10** | 264 passed, 2 skipped; 15 real-data tests; coverage 96.14 %; CQR Q_eval 1.320 / Q_final 1.742; held-out-engine coverage 0.734 → 0.777 (capped; FR-020 met, band 0.77–0.83); test 0.820 → 0.850 (capped), 0.740 → 0.750 (unclipped); artifacts byte-identical; smoke test exit 0 | M10 |
 | **M11** | 281 passed, 2 skipped; 17 real-data tests; coverage 96.36 %; smoothed anomaly threshold 5.0906 (raw 5.4036); trend median 0.693 smoothed vs 0.680 raw (FR-021 **not met**); false-alarm 0.0101 both; never flagged 0.160 vs 0.020; all `.joblib` byte-identical; smoke test exit 0 | M11 |
 | **M11 close-out** | 285 passed, 2 skipped; coverage 96.39 %; raw score served (`smoothed: false`, engine 34 1.1015 anomalous); smoothing retained, `smoothing_enabled: false`; all `.joblib` byte-identical; smoke test exit 0 | ADR-039 |
+| **M12** | 305 passed, 2 skipped; 18 real-data tests; coverage 97.31 %; permutation importance (n_repeats 10, seed 42): top sensors s_3/s_14 (train), s_14/s_3 (test); Ridge rank agreement 0.226 / 0.059; explain 12.6 s; all model files byte-identical; smoke test exit 0 | ADR-040 |

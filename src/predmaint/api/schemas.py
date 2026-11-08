@@ -264,6 +264,27 @@ class AnomalyInfo(BaseModel):
     evaluation_smoothed: dict[str, Any] | None = None
 
 
+class ImportanceEntry(BaseModel):
+    name: str
+    mean: float = Field(description="RMSE increase in cycles when permuted (mean over repeats).")
+    std: float = Field(description="Standard deviation over repeats.")
+
+
+class FeatureImportanceInfo(BaseModel):
+    """Permutation importance of the served model, test population (ADR-040)."""
+
+    population: str
+    target: str
+    n_rows: int
+    n_repeats: int
+    seed: int
+    baseline_rmse: float
+    top_features: list[ImportanceEntry]
+    per_sensor: list[ImportanceEntry]
+    caveat: str
+    computed_at: str
+
+
 class ModelInfoResponse(BaseModel):
     """Served model identity, provenance and metrics, from ``model_metadata.json``."""
 
@@ -286,6 +307,7 @@ class ModelInfoResponse(BaseModel):
     sklearn_version_match: bool
     intervals: IntervalsInfo | None = None
     anomaly: AnomalyInfo | None = None
+    feature_importance: FeatureImportanceInfo | None = None
 
 
 class ErrorBody(BaseModel):

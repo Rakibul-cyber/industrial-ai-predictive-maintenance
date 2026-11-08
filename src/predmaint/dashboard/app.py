@@ -26,6 +26,7 @@ from predmaint.dashboard.helpers import (
     compute_trajectory,
     engine_history,
     engine_payload,
+    importance_chart_frame,
     interval_band,
     interval_coverage_table,
     interval_text,
@@ -404,6 +405,48 @@ with model_tab:
             st.caption(
                 f"{anomaly['method']} · {anomaly['model_version']} · "
                 f"{anomaly['healthy_rows']:,} healthy reference rows."
+            )
+        importance = importance_chart_frame(info.body.get("feature_importance"))
+        if importance is not None:
+            fi = info.body["feature_importance"]
+            st.subheader("What drives the predictions (per-sensor permutation importance)")
+            y_axis = {
+                "field": "sensor",
+                "type": "nominal",
+                "sort": None,
+                "title": None,
+            }  # frame order
+            st.vega_lite_chart(
+                importance,
+                {
+                    "layer": [
+                        {
+                            "mark": {"type": "bar"},
+                            "encoding": {
+                                "y": y_axis,
+                                "x": {
+                                    "field": "mean",
+                                    "type": "quantitative",
+                                    "title": "RMSE increase when permuted (cycles)",
+                                },
+                            },
+                        },
+                        {
+                            "mark": {"type": "rule"},
+                            "encoding": {
+                                "y": y_axis,
+                                "x": {"field": "lo", "type": "quantitative"},
+                                "x2": {"field": "hi"},
+                            },
+                        },
+                    ]
+                },
+                width="stretch",
+            )
+            st.caption(
+                f"Test population ({fi['n_rows']} engines, {fi['n_repeats']} repeats, ±1 std): "
+                "how much the served model relies on each sensor, not a causal effect; "
+                "noisy at this sample size."
             )
         st.subheader("Metrics")
         st.table(

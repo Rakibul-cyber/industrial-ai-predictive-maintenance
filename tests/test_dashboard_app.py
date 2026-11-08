@@ -319,3 +319,35 @@ def test_app_shows_raw_only_when_smoothing_not_served(
     at.button[0].click().run()
     assert not at.exception
     assert any("Smoothing was evaluated but is not served" in c.value for c in at.caption)
+
+
+@pytest.mark.parametrize("with_importance", [True, False])
+def test_model_info_importance_chart(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch, with_importance: bool
+) -> None:
+    fi = {
+        "population": "test (official FD001 test set, last cycle of each engine)",
+        "target": "unclipped true RUL",
+        "n_rows": 100,
+        "n_repeats": 10,
+        "seed": 42,
+        "baseline_rmse": 16.61,
+        "top_features": [{"name": "cycle", "mean": 3.0, "std": 1.3}],
+        "per_sensor": [
+            {"name": "s_14", "mean": 2.5, "std": 0.8},
+            {"name": "s_3", "mean": 1.9, "std": 0.6},
+        ],
+        "caveat": "noisy",
+        "computed_at": "2026-11-09T00:00:00Z",
+    }
+    info = {**INFO, "feature_importance": fi if with_importance else None}
+    monkeypatch.setattr(ApiClient, "health", lambda self: ApiResult(True, 200, HEALTH))
+    monkeypatch.setattr(ApiClient, "model_info", lambda self: ApiResult(True, 200, info))
+    monkeypatch.setattr(ApiClient, "predict", lambda self, p: ApiResult(True, 200, _prediction(p)))
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    assert not at.exception
+    title = "What drives the predictions (per-sensor permutation importance)"
+    assert any(s.value == title for s in at.subheader) is with_importance
+    assert any("not a causal effect" in c.value for c in at.caption) is with_importance
+    assert any(s.value == "Metrics" for s in at.subheader)  # rest of the tab still renders

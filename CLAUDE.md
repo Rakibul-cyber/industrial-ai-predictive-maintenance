@@ -10,7 +10,7 @@ Portfolio-grade, end-to-end ML system: RUL regression on NASA C-MAPSS **FD001**,
 - Python 3.13; exact pins in `requirements*.txt` (docs/03).
 - Target: `RUL = max_cycle − cycle`, clipped at 125 (configurable). Features: kept sensors (≤ 2 unique values dropped), trailing rolling mean/std over 30 cycles, plus `cycle`; settings excluded; only rows with `cycle ≥ 30`.
 - Baseline `StandardScaler + Ridge`; primary `HistGradientBoostingRegressor` from one bounded 12-config search (ADR-026). 5-fold GroupKFold by unit; official test at last cycle; MAE/RMSE primary, NASA score secondary. Served model = lower CV RMSE (ADR-024); test metrics reported, never used for selection. Predictions clamped to [0, RUL_CAP] (ADR-027); health status critical < 20 ≤ warning < 60 ≤ healthy (ADR-025).
-- Artifacts: `models/model.joblib` + `models/model_metadata.json`; plus `model_intervals.*` (M8; CQR `conformal_q` in its metadata since M10) and `model_anomaly.*` (M9), each tied to the served model by `for_model_version`.
+- Artifacts: `models/model.joblib` + `models/model_metadata.json`; plus `model_intervals.*` (M8; CQR `conformal_q` in its metadata since M10) `model_anomaly.*` (M9) and `model_feature_importance.json` (M12, = `reports/feature_importance.json`), each tied to the served model by `for_model_version`. Model card: `docs/18_MODEL_CARD.md`.
 - API: `GET /health`, `POST /predict`, `POST /anomaly` (M9; raw score served — M11 smoothing evaluated, not served, ADR-039), `GET /model/info`, error envelope `{"error": {code, message, details}}`.
 - Dashboard calls the API over HTTP (`API_BASE_URL`), never imports `predmaint.models`.
 - One Docker image, compose services `api` (8000) and `dashboard` (8501); served model committed and baked into the image (ADR-030/032); `./data` bind-mounted, FD001 downloaded by the dashboard on first start (ADR-031).
@@ -66,7 +66,7 @@ FD001 only. No anomaly detection beyond the M9 detector, other subsets, deep lea
 
 ## Project state: MVP COMPLETE (2026-11-08)
 
-All milestones M0–M7 are complete (docs/08, docs/14); post-MVP Milestone 8 (prediction intervals, CR-008 / ADR-034) Milestone 9 (minimal anomaly detection, CR-010 / ADR-035; implemented, trend target not met) Milestone 10 (CQR interval calibration, CR-011 / ADR-037; FR-020 met narrowly) and Milestone 11 (smoothed anomaly score, CR-012 / ADR-038; FR-021 not met, title unchanged) are complete. The MVP is frozen: **any further work, including fixes, goes through change control (docs/15)** and needs explicit user authorization as a new milestone.
+All milestones M0–M7 are complete (docs/08, docs/14); post-MVP Milestone 8 (prediction intervals, CR-008 / ADR-034) Milestone 9 (minimal anomaly detection, CR-010 / ADR-035; implemented, trend target not met) Milestone 10 (CQR interval calibration, CR-011 / ADR-037; FR-020 met narrowly) Milestone 11 (smoothed anomaly score, CR-012 / ADR-038; FR-021 not met, title unchanged; raw score served, ADR-039) and Milestone 12 (feature importance + model card, CR-013 / ADR-040) are complete. The MVP is frozen: **any further work, including fixes, goes through change control (docs/15)** and needs explicit user authorization as a new milestone.
 
 Candidate next milestones (**NOT IMPLEMENTED, NOT authorized**; details in docs/16 §8):
 

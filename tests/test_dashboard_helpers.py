@@ -19,6 +19,7 @@ from predmaint.dashboard.helpers import (
     compute_trajectory,
     engine_history,
     engine_payload,
+    importance_chart_frame,
     interval_band,
     interval_coverage_table,
     interval_text,
@@ -314,3 +315,18 @@ def test_anomaly_info_table_side_by_side_and_fallback() -> None:
     assert list(old.columns) == ["raw score"]
     assert old.loc["Trend median (train OOF)", "raw score"] == "—"
     assert old.loc["Median detection", "raw score"] == "—"
+
+
+def test_importance_chart_frame() -> None:
+    info = {
+        "per_sensor": [
+            {"name": "s_3", "mean": 1.9, "std": 0.6},
+            {"name": "s_14", "mean": 2.5, "std": 0.8},
+        ]
+    }
+    frame = importance_chart_frame(info)
+    assert list(frame.columns) == ["sensor", "mean", "std", "lo", "hi"]
+    assert frame["sensor"].tolist() == ["s_14", "s_3"]  # sorted by mean, descending
+    assert frame.loc[0, "lo"] == pytest.approx(1.7) and frame.loc[0, "hi"] == pytest.approx(3.3)
+    assert importance_chart_frame(None) is None
+    assert importance_chart_frame({"per_sensor": []}) is None

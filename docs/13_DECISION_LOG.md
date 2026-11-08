@@ -43,6 +43,7 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-037 | Conformalized quantile regression (CQR) for the 80 % interval; one additive correction Q from OOF predictions | Accepted (2026-11-08, user-directed, CR-011) |
 | ADR-038 | Smoothed anomaly score: per-engine EWM (half-life 10, fixed in advance) of the Mahalanobis distance, OOF smoothed threshold | Accepted (2026-11-08, user-directed, CR-012); **serving clause superseded by ADR-039** |
 | ADR-039 | Serve the raw anomaly score; keep smoothing as a disabled, documented experiment (`smoothing_enabled: false`) | Accepted (2026-11-09, user-directed, CR-012 close-out) |
+| ADR-040 | Feature importance by permutation on the served model (train and test populations), Ridge coefficients as a second view, and a model card | Accepted (2026-11-09, user-directed, CR-013) |
 
 ---
 
@@ -374,3 +375,20 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Alternatives:** delete the smoothing keys (loses the negative result from the served metadata); keep serving the smoothed score (worse detection, no criterion met).
 - **Rationale:** serve the score with the better measured detection behaviour; keep the evidence of the rejected remedy reproducible.
 - **Consequences:** the history dependence of ADR-038 no longer applies to served responses. Metadata without the flag but with a `smoothing` config (M11 before this ADR) is still treated as enabled, so the flag must stay in the metadata. The detector and its artifact are unchanged.
+
+### ADR-040 — Permutation feature importance and a model card (Milestone 12)
+
+- **Context:** CR-013. The served model is a HistGradientBoostingRegressor, which has **no native `feature_importances_`**; the project had no explainability analysis and no model card.
+- **Decision:**
+  - **Method:** `sklearn.inspection.permutation_importance` on the served point-model `Pipeline` as loaded (no refit, no model change), `n_repeats = 10`, `random_state = 42` (config seed), `n_jobs = -1`. Scoring = negative RMSE of the **served** predictions (clamped to [0, RUL_CAP], ADR-027), so importance = RMSE increase in cycles when one feature column is permuted, mean ± std over the 10 repeats. Only the 43 model features are permuted.
+  - **Two populations:** (a) all 17,731 training rows (cycle ≥ 30) against the capped training target. This is in-sample, so the level is optimistic, but it is informative for ranking. (b) The 100 official test rows at the last cycle against unclipped true RUL (the official metric). This is out-of-sample but noisy, so the std across repeats is reported.
+  - **Aggregations:** per feature (43); per sensor (14), summing the raw/mean/std contributions of each sensor **within each repeat**, then mean ± std over repeats; per feature type (cycle, raw sensor, rolling mean, rolling std), covering all 43 names exactly once.
+  - **Second view:** the Ridge baseline's coefficients on standardized features (`StandardScaler` → `Ridge`), absolute values summed per sensor. Source: `models/baseline.joblib` if present and trained on the same data hashes. That artifact is a **local, gitignored** candidate, not committed. Otherwise the deterministic baseline is retrained into a temporary directory; `models/` and the primary are never touched. Spearman rank agreement between Ridge per-sensor |coef| and permutation per-sensor importance is reported for both populations.
+  - **Outputs:** `reports/feature_importance.json` (committed). An identical copy `models/model_feature_importance.json` with `for_model_version` is committed and baked into the image, loaded next to `MODEL_PATH` like the interval and anomaly artifacts; absent or mismatched → `feature_importance: null` and a warning. Entry `scripts/train.py --explain`, which refuses without `models/model_metadata.json`.
+  - **API (additive):** `/model/info.feature_importance`: population label, n_repeats, seed, top 10 features and the 14-sensor table from the **test** population. `api_version` 0.6.0.
+  - **Dashboard:** model-info horizontal bar chart of per-sensor importance (test population) with ±1 std error rules, and a one-line caveat.
+  - **Model card:** `docs/18_MODEL_CARD.md` (Mitchell et al. structure). Every numeric table is generated from a `reports/` or `models/` file and names it on a `Source:` line.
+- **Caveats (stated in the report and card):** permutation importance measures the model's reliance on a feature, not causal effect. Correlated features (a sensor's raw, mean and std; correlated sensors) share importance, and permuting one can understate the group, which is why per-sensor sums are reported. The test population has 100 rows, so its ranking is noisy.
+- **Alternatives:** SHAP (new dependency, excluded); HGB impurity-based importance (not exposed by scikit-learn for HGB); drop-column importance (needs retraining, excluded).
+- **Consequences:** a new committed sidecar file that must be regenerated after every `--select` (like the interval and anomaly artifacts); no effect on predictions.
+- **Outcome (M12, 2026-11-09):** top sensors `s_3`/`s_14` in both populations; rolling features dominate; `cycle` is the top test feature; Ridge rank agreement 0.226 (train) / 0.059 (test). The baseline came from the local candidate `models/baseline.joblib`; the retrain-to-temp path is tested. All model files byte-identical. The model card was generated by a one-off script (not committed).

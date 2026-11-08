@@ -1,0 +1,948 @@
+{
+  "artifact": "feature_importance",
+  "model_version": "primary-20261108-f4c86df",
+  "for_model_version": "primary-20261108-f4c86df",
+  "computed_at": "2026-11-08T23:35:15Z",
+  "git_sha": "0ab2bb2d3522041122ac1180b08db0083674c66f",
+  "method": "sklearn.inspection.permutation_importance on the served Pipeline (no refit); importance = increase in RMSE (cycles) of served predictions clamped to [0, rul_cap] when one feature column is permuted; mean \u00b1 std over repeats; per-sensor and per-type values sum the features' importances within each repeat",
+  "scikit_learn": "1.9.1",
+  "n_repeats": 10,
+  "seed": 42,
+  "n_jobs": -1,
+  "n_features": 43,
+  "feature_types": [
+    "cycle",
+    "raw sensor",
+    "rolling mean",
+    "rolling std"
+  ],
+  "data": {
+    "subset": "FD001",
+    "train_sha256": "963b5e22825b34d8b21c69e1aeb4af3e647050eb672ee8834ba4b5d91d2de0f8",
+    "test_sha256": "3cda7109ce17bafb5443f2ac926cfcf88154b941b8c4cf95eb55d1ddd6f52851",
+    "rul_sha256": "a19c8ec94931949d0485bdc35118206e9c81c4547b422efb9cf86f4ceddbceca"
+  },
+  "populations": {
+    "train": {
+      "n_rows": 17731,
+      "baseline_rmse": 9.532730101117165,
+      "per_feature": [
+        {
+          "name": "cycle",
+          "sensor": null,
+          "type": "cycle",
+          "mean": 6.868930532165483,
+          "std": 0.054614420164572
+        },
+        {
+          "name": "s_3_roll_mean",
+          "sensor": "s_3",
+          "type": "rolling mean",
+          "mean": 4.335973356292455,
+          "std": 0.0452660239709683
+        },
+        {
+          "name": "s_2_roll_mean",
+          "sensor": "s_2",
+          "type": "rolling mean",
+          "mean": 2.5920326295719263,
+          "std": 0.034261188148560724
+        },
+        {
+          "name": "s_14_roll_std",
+          "sensor": "s_14",
+          "type": "rolling std",
+          "mean": 2.197925532517853,
+          "std": 0.03145112319427557
+        },
+        {
+          "name": "s_14_roll_mean",
+          "sensor": "s_14",
+          "type": "rolling mean",
+          "mean": 1.897074098582071,
+          "std": 0.020207978407287025
+        },
+        {
+          "name": "s_12_roll_std",
+          "sensor": "s_12",
+          "type": "rolling std",
+          "mean": 1.4724482282952336,
+          "std": 0.03519923260041694
+        },
+        {
+          "name": "s_13_roll_std",
+          "sensor": "s_13",
+          "type": "rolling std",
+          "mean": 1.4695364479655124,
+          "std": 0.03128726121597677
+        },
+        {
+          "name": "s_11_roll_std",
+          "sensor": "s_11",
+          "type": "rolling std",
+          "mean": 1.3948536894613315,
+          "std": 0.021348044332188607
+        },
+        {
+          "name": "s_9_roll_std",
+          "sensor": "s_9",
+          "type": "rolling std",
+          "mean": 1.3616381027905542,
+          "std": 0.018218376180880447
+        },
+        {
+          "name": "s_17_roll_mean",
+          "sensor": "s_17",
+          "type": "rolling mean",
+          "mean": 1.1435097622919532,
+          "std": 0.015015152639960115
+        },
+        {
+          "name": "s_8_roll_std",
+          "sensor": "s_8",
+          "type": "rolling std",
+          "mean": 1.1027992149330197,
+          "std": 0.019054519333145586
+        },
+        {
+          "name": "s_8_roll_mean",
+          "sensor": "s_8",
+          "type": "rolling mean",
+          "mean": 0.9680117468797655,
+          "std": 0.020021829189864476
+        },
+        {
+          "name": "s_9_roll_mean",
+          "sensor": "s_9",
+          "type": "rolling mean",
+          "mean": 0.9480616874276848,
+          "std": 0.011961149736208756
+        },
+        {
+          "name": "s_7_roll_std",
+          "sensor": "s_7",
+          "type": "rolling std",
+          "mean": 0.8670368003713236,
+          "std": 0.029428175296977617
+        },
+        {
+          "name": "s_7_roll_mean",
+          "sensor": "s_7",
+          "type": "rolling mean",
+          "mean": 0.8368153595741932,
+          "std": 0.017306085778165982
+        },
+        {
+          "name": "s_11",
+          "sensor": "s_11",
+          "type": "raw sensor",
+          "mean": 0.8351771197917006,
+          "std": 0.016960509017176315
+        },
+        {
+          "name": "s_13_roll_mean",
+          "sensor": "s_13",
+          "type": "rolling mean",
+          "mean": 0.7814197857713585,
+          "std": 0.017172467603850772
+        },
+        {
+          "name": "s_4_roll_std",
+          "sensor": "s_4",
+          "type": "rolling std",
+          "mean": 0.6807765381691983,
+          "std": 0.018329160998959294
+        },
+        {
+          "name": "s_4_roll_mean",
+          "sensor": "s_4",
+          "type": "rolling mean",
+          "mean": 0.5455588776151213,
+          "std": 0.011273995546513352
+        },
+        {
+          "name": "s_15_roll_mean",
+          "sensor": "s_15",
+          "type": "rolling mean",
+          "mean": 0.48934440639118737,
+          "std": 0.009696996715582894
+        },
+        {
+          "name": "s_20_roll_std",
+          "sensor": "s_20",
+          "type": "rolling std",
+          "mean": 0.4708655469990498,
+          "std": 0.00794257785972922
+        },
+        {
+          "name": "s_21_roll_mean",
+          "sensor": "s_21",
+          "type": "rolling mean",
+          "mean": 0.4289605358959115,
+          "std": 0.011844725267644705
+        },
+        {
+          "name": "s_20_roll_mean",
+          "sensor": "s_20",
+          "type": "rolling mean",
+          "mean": 0.42872337449612663,
+          "std": 0.013413696726494137
+        },
+        {
+          "name": "s_4",
+          "sensor": "s_4",
+          "type": "raw sensor",
+          "mean": 0.3898384480160363,
+          "std": 0.015086250035294782
+        },
+        {
+          "name": "s_15_roll_std",
+          "sensor": "s_15",
+          "type": "rolling std",
+          "mean": 0.37162530534109095,
+          "std": 0.011316180704698973
+        },
+        {
+          "name": "s_12",
+          "sensor": "s_12",
+          "type": "raw sensor",
+          "mean": 0.28270559032221454,
+          "std": 0.013910571718615258
+        },
+        {
+          "name": "s_12_roll_mean",
+          "sensor": "s_12",
+          "type": "rolling mean",
+          "mean": 0.26513517138746856,
+          "std": 0.006353411659421547
+        },
+        {
+          "name": "s_9",
+          "sensor": "s_9",
+          "type": "raw sensor",
+          "mean": 0.2462264661823214,
+          "std": 0.01017497894013675
+        },
+        {
+          "name": "s_15",
+          "sensor": "s_15",
+          "type": "raw sensor",
+          "mean": 0.21065482373992772,
+          "std": 0.008495038513812869
+        },
+        {
+          "name": "s_17_roll_std",
+          "sensor": "s_17",
+          "type": "rolling std",
+          "mean": 0.2049206116771442,
+          "std": 0.004865297051340747
+        },
+        {
+          "name": "s_3_roll_std",
+          "sensor": "s_3",
+          "type": "rolling std",
+          "mean": 0.19630652996211245,
+          "std": 0.0027553321285621597
+        },
+        {
+          "name": "s_7",
+          "sensor": "s_7",
+          "type": "raw sensor",
+          "mean": 0.19476423975038487,
+          "std": 0.006520172851846765
+        },
+        {
+          "name": "s_11_roll_mean",
+          "sensor": "s_11",
+          "type": "rolling mean",
+          "mean": 0.14649278466682336,
+          "std": 0.004724899863632589
+        },
+        {
+          "name": "s_20",
+          "sensor": "s_20",
+          "type": "raw sensor",
+          "mean": 0.1389053324671302,
+          "std": 0.0063368796861397805
+        },
+        {
+          "name": "s_2_roll_std",
+          "sensor": "s_2",
+          "type": "rolling std",
+          "mean": 0.13718541350144556,
+          "std": 0.003063741592386145
+        },
+        {
+          "name": "s_2",
+          "sensor": "s_2",
+          "type": "raw sensor",
+          "mean": 0.12103560321253629,
+          "std": 0.003333851582824738
+        },
+        {
+          "name": "s_21_roll_std",
+          "sensor": "s_21",
+          "type": "rolling std",
+          "mean": 0.11491446791324815,
+          "std": 0.002598521750635802
+        },
+        {
+          "name": "s_13",
+          "sensor": "s_13",
+          "type": "raw sensor",
+          "mean": 0.10833293271696949,
+          "std": 0.003639743683427301
+        },
+        {
+          "name": "s_8",
+          "sensor": "s_8",
+          "type": "raw sensor",
+          "mean": 0.0942996814176528,
+          "std": 0.002822515217122326
+        },
+        {
+          "name": "s_14",
+          "sensor": "s_14",
+          "type": "raw sensor",
+          "mean": 0.08582364468280819,
+          "std": 0.004643140054611753
+        },
+        {
+          "name": "s_3",
+          "sensor": "s_3",
+          "type": "raw sensor",
+          "mean": 0.05398365497316089,
+          "std": 0.002832130716796379
+        },
+        {
+          "name": "s_17",
+          "sensor": "s_17",
+          "type": "raw sensor",
+          "mean": 0.044978650400086195,
+          "std": 0.0022010616902228986
+        },
+        {
+          "name": "s_21",
+          "sensor": "s_21",
+          "type": "raw sensor",
+          "mean": 0.03967792632502611,
+          "std": 0.0014095106592568077
+        }
+      ],
+      "per_sensor": [
+        {
+          "name": "s_3",
+          "n_features": 3,
+          "mean": 4.58626354122773,
+          "std": 0.044502035878689034
+        },
+        {
+          "name": "s_14",
+          "n_features": 3,
+          "mean": 4.180823275782733,
+          "std": 0.04419327733511078
+        },
+        {
+          "name": "s_2",
+          "n_features": 3,
+          "mean": 2.850253646285908,
+          "std": 0.037104293549804025
+        },
+        {
+          "name": "s_9",
+          "n_features": 3,
+          "mean": 2.5559262564005603,
+          "std": 0.0259212182139403
+        },
+        {
+          "name": "s_11",
+          "n_features": 3,
+          "mean": 2.3765235939198552,
+          "std": 0.02629774203292513
+        },
+        {
+          "name": "s_13",
+          "n_features": 3,
+          "mean": 2.3592891664538405,
+          "std": 0.02766258267684031
+        },
+        {
+          "name": "s_8",
+          "n_features": 3,
+          "mean": 2.165110643230438,
+          "std": 0.033633684438015024
+        },
+        {
+          "name": "s_12",
+          "n_features": 3,
+          "mean": 2.0202889900049166,
+          "std": 0.03967002867410543
+        },
+        {
+          "name": "s_7",
+          "n_features": 3,
+          "mean": 1.8986163996959018,
+          "std": 0.03242886099026101
+        },
+        {
+          "name": "s_4",
+          "n_features": 3,
+          "mean": 1.616173863800356,
+          "std": 0.027026544828793218
+        },
+        {
+          "name": "s_17",
+          "n_features": 3,
+          "mean": 1.3934090243691837,
+          "std": 0.01619977399475558
+        },
+        {
+          "name": "s_15",
+          "n_features": 3,
+          "mean": 1.071624535472206,
+          "std": 0.015469825145813217
+        },
+        {
+          "name": "s_20",
+          "n_features": 3,
+          "mean": 1.0384942539623068,
+          "std": 0.017836066641511186
+        },
+        {
+          "name": "s_21",
+          "n_features": 3,
+          "mean": 0.5835529301341857,
+          "std": 0.012123528613442323
+        }
+      ],
+      "per_feature_type": [
+        {
+          "name": "rolling mean",
+          "n_features": 14,
+          "mean": 15.807113576844046,
+          "std": 0.09153454307080991
+        },
+        {
+          "name": "rolling std",
+          "n_features": 14,
+          "mean": 12.042832429898118,
+          "std": 0.09744866456608306
+        },
+        {
+          "name": "cycle",
+          "n_features": 1,
+          "mean": 6.868930532165483,
+          "std": 0.054614420164572
+        },
+        {
+          "name": "raw sensor",
+          "n_features": 14,
+          "mean": 2.8464041139979557,
+          "std": 0.05514931702942429
+        }
+      ],
+      "target": "capped training RUL (min(RUL, 125)), the training target",
+      "caveat": "in-sample: RMSE level optimistic, informative for ranking"
+    },
+    "test": {
+      "n_rows": 100,
+      "baseline_rmse": 16.609852374016835,
+      "per_feature": [
+        {
+          "name": "cycle",
+          "sensor": null,
+          "type": "cycle",
+          "mean": 2.991098310060003,
+          "std": 1.2867173229649287
+        },
+        {
+          "name": "s_14_roll_std",
+          "sensor": "s_14",
+          "type": "rolling std",
+          "mean": 1.84647209719984,
+          "std": 0.4950621016027734
+        },
+        {
+          "name": "s_3_roll_mean",
+          "sensor": "s_3",
+          "type": "rolling mean",
+          "mean": 1.8241681737467625,
+          "std": 0.6151378707234411
+        },
+        {
+          "name": "s_2_roll_mean",
+          "sensor": "s_2",
+          "type": "rolling mean",
+          "mean": 1.0630938479607064,
+          "std": 0.5161851580561017
+        },
+        {
+          "name": "s_11_roll_std",
+          "sensor": "s_11",
+          "type": "rolling std",
+          "mean": 0.9608799567168045,
+          "std": 0.5367954945219997
+        },
+        {
+          "name": "s_11",
+          "sensor": "s_11",
+          "type": "raw sensor",
+          "mean": 0.7168944743257025,
+          "std": 0.19796387783600405
+        },
+        {
+          "name": "s_13_roll_std",
+          "sensor": "s_13",
+          "type": "rolling std",
+          "mean": 0.6899831695671625,
+          "std": 0.31738501470839764
+        },
+        {
+          "name": "s_14_roll_mean",
+          "sensor": "s_14",
+          "type": "rolling mean",
+          "mean": 0.6647104337994577,
+          "std": 0.47536593686457645
+        },
+        {
+          "name": "s_7_roll_std",
+          "sensor": "s_7",
+          "type": "rolling std",
+          "mean": 0.5831618021179577,
+          "std": 0.25001446536217425
+        },
+        {
+          "name": "s_13_roll_mean",
+          "sensor": "s_13",
+          "type": "rolling mean",
+          "mean": 0.5773726538181311,
+          "std": 0.27633342946917
+        },
+        {
+          "name": "s_7_roll_mean",
+          "sensor": "s_7",
+          "type": "rolling mean",
+          "mean": 0.4965127437110599,
+          "std": 0.18012309763216483
+        },
+        {
+          "name": "s_4_roll_std",
+          "sensor": "s_4",
+          "type": "rolling std",
+          "mean": 0.48118320361994193,
+          "std": 0.25999287157842166
+        },
+        {
+          "name": "s_8_roll_mean",
+          "sensor": "s_8",
+          "type": "rolling mean",
+          "mean": 0.3282363433559176,
+          "std": 0.2482362610921047
+        },
+        {
+          "name": "s_4",
+          "sensor": "s_4",
+          "type": "raw sensor",
+          "mean": 0.3084786038728907,
+          "std": 0.19650167459548962
+        },
+        {
+          "name": "s_8_roll_std",
+          "sensor": "s_8",
+          "type": "rolling std",
+          "mean": 0.29218197843385774,
+          "std": 0.43360697073232024
+        },
+        {
+          "name": "s_21_roll_mean",
+          "sensor": "s_21",
+          "type": "rolling mean",
+          "mean": 0.26330162258171264,
+          "std": 0.12294900582517301
+        },
+        {
+          "name": "s_17_roll_mean",
+          "sensor": "s_17",
+          "type": "rolling mean",
+          "mean": 0.24787653475950472,
+          "std": 0.2951021343333264
+        },
+        {
+          "name": "s_4_roll_mean",
+          "sensor": "s_4",
+          "type": "rolling mean",
+          "mean": 0.16636148948748186,
+          "std": 0.1367047044316885
+        },
+        {
+          "name": "s_12",
+          "sensor": "s_12",
+          "type": "raw sensor",
+          "mean": 0.13425122062661005,
+          "std": 0.151751458843969
+        },
+        {
+          "name": "s_9",
+          "sensor": "s_9",
+          "type": "raw sensor",
+          "mean": 0.13029954120599463,
+          "std": 0.20936533652432235
+        },
+        {
+          "name": "s_20_roll_mean",
+          "sensor": "s_20",
+          "type": "rolling mean",
+          "mean": 0.12879845084958214,
+          "std": 0.11966933233457452
+        },
+        {
+          "name": "s_11_roll_mean",
+          "sensor": "s_11",
+          "type": "rolling mean",
+          "mean": 0.12331886210972556,
+          "std": 0.059183200299251705
+        },
+        {
+          "name": "s_13",
+          "sensor": "s_13",
+          "type": "raw sensor",
+          "mean": 0.11433716243017109,
+          "std": 0.08456501287247017
+        },
+        {
+          "name": "s_21_roll_std",
+          "sensor": "s_21",
+          "type": "rolling std",
+          "mean": 0.10111334371399608,
+          "std": 0.04965235849052891
+        },
+        {
+          "name": "s_15",
+          "sensor": "s_15",
+          "type": "raw sensor",
+          "mean": 0.09381192078514893,
+          "std": 0.1396038244581263
+        },
+        {
+          "name": "s_8",
+          "sensor": "s_8",
+          "type": "raw sensor",
+          "mean": 0.07900147255066799,
+          "std": 0.08156928756249761
+        },
+        {
+          "name": "s_2",
+          "sensor": "s_2",
+          "type": "raw sensor",
+          "mean": 0.07341242291200345,
+          "std": 0.06774117038543434
+        },
+        {
+          "name": "s_9_roll_std",
+          "sensor": "s_9",
+          "type": "rolling std",
+          "mean": 0.04435752345383435,
+          "std": 0.24874124062950012
+        },
+        {
+          "name": "s_3",
+          "sensor": "s_3",
+          "type": "raw sensor",
+          "mean": 0.037447485645994406,
+          "std": 0.033775029003965444
+        },
+        {
+          "name": "s_12_roll_mean",
+          "sensor": "s_12",
+          "type": "rolling mean",
+          "mean": 0.03089478712915188,
+          "std": 0.05666092451589903
+        },
+        {
+          "name": "s_20_roll_std",
+          "sensor": "s_20",
+          "type": "rolling std",
+          "mean": 0.029887906813366526,
+          "std": 0.1313136802094226
+        },
+        {
+          "name": "s_3_roll_std",
+          "sensor": "s_3",
+          "type": "rolling std",
+          "mean": 0.022583592059230995,
+          "std": 0.08613316099029256
+        },
+        {
+          "name": "s_14",
+          "sensor": "s_14",
+          "type": "raw sensor",
+          "mean": 0.022546012773161195,
+          "std": 0.040779793371808204
+        },
+        {
+          "name": "s_21",
+          "sensor": "s_21",
+          "type": "raw sensor",
+          "mean": 0.019883364911174796,
+          "std": 0.01602984476661767
+        },
+        {
+          "name": "s_7",
+          "sensor": "s_7",
+          "type": "raw sensor",
+          "mean": 0.017206149277564718,
+          "std": 0.08518762411216381
+        },
+        {
+          "name": "s_2_roll_std",
+          "sensor": "s_2",
+          "type": "rolling std",
+          "mean": -0.0015856736259383553,
+          "std": 0.035520142696241735
+        },
+        {
+          "name": "s_9_roll_mean",
+          "sensor": "s_9",
+          "type": "rolling mean",
+          "mean": -0.010410733018919061,
+          "std": 0.15266439402351195
+        },
+        {
+          "name": "s_17",
+          "sensor": "s_17",
+          "type": "raw sensor",
+          "mean": -0.012490120321172781,
+          "std": 0.033773916343142446
+        },
+        {
+          "name": "s_15_roll_std",
+          "sensor": "s_15",
+          "type": "rolling std",
+          "mean": -0.027891902106469503,
+          "std": 0.09224825977123179
+        },
+        {
+          "name": "s_20",
+          "sensor": "s_20",
+          "type": "raw sensor",
+          "mean": -0.02804796147322115,
+          "std": 0.057445049035131195
+        },
+        {
+          "name": "s_15_roll_mean",
+          "sensor": "s_15",
+          "type": "rolling mean",
+          "mean": -0.03630350468527439,
+          "std": 0.11679633785420952
+        },
+        {
+          "name": "s_17_roll_std",
+          "sensor": "s_17",
+          "type": "rolling std",
+          "mean": -0.036313244260684385,
+          "std": 0.07707517504701833
+        },
+        {
+          "name": "s_12_roll_std",
+          "sensor": "s_12",
+          "type": "rolling std",
+          "mean": -0.04028921611859051,
+          "std": 0.429012937122965
+        }
+      ],
+      "per_sensor": [
+        {
+          "name": "s_14",
+          "n_features": 3,
+          "mean": 2.533728543772459,
+          "std": 0.8440566806570736
+        },
+        {
+          "name": "s_3",
+          "n_features": 3,
+          "mean": 1.884199251451988,
+          "std": 0.6157038299411721
+        },
+        {
+          "name": "s_11",
+          "n_features": 3,
+          "mean": 1.8010932931522325,
+          "std": 0.6029186361900506
+        },
+        {
+          "name": "s_13",
+          "n_features": 3,
+          "mean": 1.3816929858154647,
+          "std": 0.4118148676710239
+        },
+        {
+          "name": "s_2",
+          "n_features": 3,
+          "mean": 1.1349205972467715,
+          "std": 0.5130615377237034
+        },
+        {
+          "name": "s_7",
+          "n_features": 3,
+          "mean": 1.0968806951065821,
+          "std": 0.43020634374744315
+        },
+        {
+          "name": "s_4",
+          "n_features": 3,
+          "mean": 0.9560232969803145,
+          "std": 0.42191122928849717
+        },
+        {
+          "name": "s_8",
+          "n_features": 3,
+          "mean": 0.6994197943404433,
+          "std": 0.4512657716154557
+        },
+        {
+          "name": "s_21",
+          "n_features": 3,
+          "mean": 0.3842983312068835,
+          "std": 0.14070560191732312
+        },
+        {
+          "name": "s_17",
+          "n_features": 3,
+          "mean": 0.19907317017764753,
+          "std": 0.2698307906604082
+        },
+        {
+          "name": "s_9",
+          "n_features": 3,
+          "mean": 0.1642463316409099,
+          "std": 0.5324135181901626
+        },
+        {
+          "name": "s_20",
+          "n_features": 3,
+          "mean": 0.1306383961897275,
+          "std": 0.21588173956037876
+        },
+        {
+          "name": "s_12",
+          "n_features": 3,
+          "mean": 0.12485679163717141,
+          "std": 0.4717979945461994
+        },
+        {
+          "name": "s_15",
+          "n_features": 3,
+          "mean": 0.029616513993405036,
+          "std": 0.27162410721244273
+        }
+      ],
+      "per_feature_type": [
+        {
+          "name": "rolling mean",
+          "n_features": 14,
+          "mean": 5.867931705605001,
+          "std": 1.3040626557508843
+        },
+        {
+          "name": "rolling std",
+          "n_features": 14,
+          "mean": 4.94572453758431,
+          "std": 1.1428747551886616
+        },
+        {
+          "name": "cycle",
+          "n_features": 1,
+          "mean": 2.991098310060003,
+          "std": 1.2867173229649287
+        },
+        {
+          "name": "raw sensor",
+          "n_features": 14,
+          "mean": 1.7070317495226905,
+          "std": 0.7468581696243385
+        }
+      ],
+      "target": "unclipped true RUL (RUL_FD001), the official test metric",
+      "caveat": "out-of-sample but only 100 rows: noisy, see std across repeats"
+    }
+  },
+  "ridge_comparison": {
+    "baseline_model_version": "ridge-20261108T150138Z",
+    "source": "models/baseline.joblib",
+    "method": "abs(Ridge coefficient) on standardized features, summed per sensor",
+    "per_sensor": [
+      {
+        "name": "s_13",
+        "abs_coef_sum": 24.70852006034091
+      },
+      {
+        "name": "s_8",
+        "abs_coef_sum": 21.43647333023336
+      },
+      {
+        "name": "s_9",
+        "abs_coef_sum": 15.35203781513628
+      },
+      {
+        "name": "s_7",
+        "abs_coef_sum": 11.144686213609926
+      },
+      {
+        "name": "s_14",
+        "abs_coef_sum": 10.768108514384855
+      },
+      {
+        "name": "s_15",
+        "abs_coef_sum": 10.222267177311892
+      },
+      {
+        "name": "s_4",
+        "abs_coef_sum": 10.204811999014165
+      },
+      {
+        "name": "s_2",
+        "abs_coef_sum": 8.546292248557453
+      },
+      {
+        "name": "s_12",
+        "abs_coef_sum": 7.917341139080289
+      },
+      {
+        "name": "s_11",
+        "abs_coef_sum": 7.910235506512503
+      },
+      {
+        "name": "s_17",
+        "abs_coef_sum": 6.751244431572027
+      },
+      {
+        "name": "s_20",
+        "abs_coef_sum": 4.575458582898424
+      },
+      {
+        "name": "s_21",
+        "abs_coef_sum": 3.6910876375859925
+      },
+      {
+        "name": "s_3",
+        "abs_coef_sum": 3.3986952695637234
+      }
+    ],
+    "spearman_vs_permutation_per_sensor": {
+      "train": 0.22637362637362637,
+      "test": 0.059340659340659345
+    }
+  },
+  "caveats": [
+    "Permutation importance measures how much the served model relies on a feature, not a causal effect.",
+    "Correlated features share importance: permuting one of a sensor's raw/mean/std columns or one of several correlated sensors can understate the group (hence per-sensor sums).",
+    "Training population: in-sample, so the RMSE level is optimistic; use it for ranking.",
+    "Test population: 100 engines at their last cycle, out-of-sample but noisy; see the std across repeats.",
+    "HistGradientBoostingRegressor has no native feature_importances_ in scikit-learn."
+  ],
+  "timings_seconds": {
+    "train_population": 11.9,
+    "test_population": 0.6,
+    "ridge": 0.0
+  }
+}

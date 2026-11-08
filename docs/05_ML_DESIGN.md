@@ -237,6 +237,10 @@ Full tables and what the evaluation does and does not prove: [16 §10](16_EVALUA
 
 **FR-021 NOT MET** (trend 0.693 ≤ 0.7; false-alarm 0.0101 ≤ 0.02 met). 16 §10d has the full comparison. **ADR-039:** the remedy is rejected for serving; the metadata sets `smoothing_enabled: false`, so `score_anomaly` serves the raw score, and the smoothing path is kept and tested through an enabled variant.
 
+### 10c. Feature importance and model card (M12, ADR-040)
+
+Permutation importance of the served Pipeline (no refit; n_repeats 10, seed 42; RMSE of served, clamped predictions) for the training and official-test populations, per feature, sensor and feature type, with a Ridge-coefficient comparison: `scripts/train.py --explain` → [`reports/feature_importance.json`](../reports/feature_importance.json) (identical copy `models/model_feature_importance.json` for the API). Summary in [16 §11](16_EVALUATION_REPORT.md); the model card with all metrics, hashes and limitations is [18](18_MODEL_CARD.md).
+
 ## 11. Limitations
 
 - FD001 only: one operating condition and one fault mode; the model is not valid for other conditions.

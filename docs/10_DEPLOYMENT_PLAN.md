@@ -68,7 +68,7 @@ No secrets exist in the MVP. `.env` is gitignored.
 
 - `FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90`: the multi-arch index digest (amd64 + arm64) of `python:3.13-slim` on 2026-11-08, i.e. Python 3.13.18 on Debian trixie (R9).
 - `pip install --only-binary=:all: -r requirements.txt`: every dependency installs from a wheel, so no compiler is needed and none is present (verified: no `gcc`/`cc`/`make` in the image). A multi-stage build is therefore unnecessary.
-- Copies `src/`, `scripts/`, `examples/`, and the six committed model files: `models/model.joblib` + `models/model_metadata.json`, since M8 `models/model_intervals.joblib` + `models/model_intervals_metadata.json` (ADR-034), and since M9 `models/model_anomaly.joblib` + `models/model_anomaly_metadata.json` (ADR-035). `.dockerignore` excludes `.git`, `.github`, `.venv*`, `data/`, `docs/`, `tests/`, `reports/`, `models/baseline*`, `models/primary*`, caches and `.env`.
+- Copies `src/`, `scripts/`, `examples/`, and the six committed model files: `models/model.joblib` + `models/model_metadata.json`, since M8 `models/model_intervals.joblib` + `models/model_intervals_metadata.json` (ADR-034), since M9 `models/model_anomaly.joblib` + `models/model_anomaly_metadata.json` (ADR-035), and since M12 `models/model_feature_importance.json` (ADR-040). `.dockerignore` excludes `.git`, `.github`, `.venv*`, `data/`, `docs/`, `tests/`, `reports/`, `models/baseline*`, `models/primary*`, caches and `.env`.
 - `PYTHONPATH=/app/src` (no package install step), `HOME=/tmp` (so Streamlit works under any host UID), non-root user `app` (uid/gid 1000), `EXPOSE 8000 8501`, default `CMD ["python", "-m", "predmaint.api.main"]`.
 - **Size (arm64, 2026-11-08):** `docker images` → **1.1 GB** on disk; `docker image inspect --format '{{.Size}}'` → 242,889,009 bytes (layer content size). Unpacked site-packages are 655 MB, led by pyarrow 155 MB (a Streamlit dependency), scipy 117 MB, pandas 83 MB, scikit-learn 57 MB, numpy 40 MB, streamlit 39 MB. Build time 57 s cold, seconds when cached. After M8 (interval artifact added): `docker images` → **1.11 GB**; content size 243,180,146 bytes. After M9 (anomaly artifact, 4,845 + 3,927 bytes): **1.11 GB**; content size 243,192,895 bytes.
 
@@ -101,11 +101,15 @@ Ports are published on **127.0.0.1 only**, so nothing is exposed on the LAN by d
   pytest -q                                 # artifact + real-data checks
   python scripts/train.py --model intervals # AFTER --select: interval models for the new served model (ADR-034)
   python scripts/train.py --model anomaly   # AFTER --select: anomaly detector for the new served model (ADR-035; ~2 s)
-  # (then the three make_request_payload.py commands above, so the sidecar has the new bounds and anomaly block)
+  python scripts/train.py --explain         # AFTER --select: permutation importance (ADR-040; ~15 s)
+  # (then the three make_request_payload.py commands above, so the sidecar has the new bounds and anomaly block,
+  #  and update docs/18_MODEL_CARD.md from the new files: it was generated in M12 by a one-off script that is
+  #  not committed (14), and tests/test_model_card.py fails while its artifact hashes are stale)
   git add models/model.joblib models/model_metadata.json \
           models/model_intervals.joblib models/model_intervals_metadata.json \
           models/model_anomaly.joblib models/model_anomaly_metadata.json \
-          reports/ examples/expected_predictions.json   # all six model files TOGETHER
+          models/model_feature_importance.json \
+          reports/ examples/expected_predictions.json docs/18_MODEL_CARD.md   # all model files TOGETHER
   docker compose up -d --build              # rebuild: the model is baked into the image
   ```
 
@@ -132,6 +136,6 @@ Ports are published on **127.0.0.1 only**, so nothing is exposed on the LAN by d
 
 - Image size 1.1 GB on disk, dominated by scientific/Streamlit wheels; one image serves both roles (ADR-032), so the API image carries Streamlit/pyarrow.
 - The dashboard's first start needs network access; the API never does.
-- Retraining requires a rebuild (model baked in) and a commit of all six model files; the interval and anomaly artifacts must be retrained after every `--select`, otherwise the API ignores them (`for_model_version` mismatch).
+- Retraining requires a rebuild (model baked in) and a commit of all six model files; the interval anomaly and feature-importance artifacts must be regenerated after every `--select`, otherwise the API ignores them (`for_model_version` mismatch).
 - Ports 8000/8501 must be free for the demo stack (override with `API_HOST_PORT` / `DASHBOARD_HOST_PORT`). The smoke test uses its own compose project (`predmaint-smoke`) and its own host ports 18000/18501 (`SMOKE_API_PORT`, `SMOKE_DASHBOARD_PORT`), so it runs while a demo stack is up (CR-009).
 - No TLS, auth, CORS, rate limiting or multi-worker serving: local demo only (ADR-012).

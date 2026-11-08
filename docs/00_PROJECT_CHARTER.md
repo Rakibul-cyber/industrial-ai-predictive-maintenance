@@ -68,7 +68,9 @@ These are candidate extensions only after Milestone 7 and only via [15](15_CHANG
 
 **Post-MVP extension (Milestone 10, CR-011 / ADR-037):** conformal calibration (CQR) of the M8 80 % interval using the existing out-of-fold predictions, evaluated on held-out training engines against a pre-registered coverage target (FR-020). No model is retrained. Outcome: FR-020 met narrowly (held-out coverage 0.777 for a 0.77–0.83 band; 16 §9d).
 
-**Post-MVP extension (Milestone 11, CR-012 / ADR-038):** one pre-specified remedy for the FR-019 shortfall: a per-engine exponentially weighted moving average (half-life 10 cycles, fixed in advance) of the anomaly score, with an out-of-fold threshold for the smoothed score, evaluated side by side with the raw score against a pre-registered criterion (FR-021). Outcome: **not met** (smoothed trend median 0.693 ≤ 0.7), so the project title is unchanged (16 §10d). Remaining extensions stay NOT IMPLEMENTED.
+**Post-MVP extension (Milestone 11, CR-012 / ADR-038):** one pre-specified remedy for the FR-019 shortfall: a per-engine exponentially weighted moving average (half-life 10 cycles, fixed in advance) of the anomaly score, with an out-of-fold threshold for the smoothed score, evaluated side by side with the raw score against a pre-registered criterion (FR-021). Outcome: **not met** (smoothed trend median 0.693 ≤ 0.7), so the project title is unchanged (16 §10d). Close-out (ADR-039): the remedy is rejected and the raw score is served.
+
+**Post-MVP extension (Milestone 12, CR-013 / ADR-040):** explainability without model changes: permutation feature importance of the served model (training and test populations, per feature, sensor and feature type, with a Ridge-coefficient comparison) in a report, `/model/info` and the dashboard, plus a model card (`docs/18_MODEL_CARD.md`) whose numbers trace to committed files. Outcome: implemented (FR-022 met); no model changed. Remaining extensions stay NOT IMPLEMENTED.
 
 ## 8. Success criteria
 

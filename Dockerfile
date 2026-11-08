@@ -33,7 +33,8 @@ COPY scripts/ scripts/
 COPY examples/ examples/
 COPY models/model.joblib models/model_metadata.json \
      models/model_intervals.joblib models/model_intervals_metadata.json \
-     models/model_anomaly.joblib models/model_anomaly_metadata.json models/
+     models/model_anomaly.joblib models/model_anomaly_metadata.json \
+     models/model_feature_importance.json models/
 
 USER app
 EXPOSE 8000 8501

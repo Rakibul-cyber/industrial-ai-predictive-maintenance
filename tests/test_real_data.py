@@ -296,3 +296,39 @@ def test_anomaly_detector_parameters_identical_to_m9(tmp_path: Path) -> None:
         assert np.array_equal(
             getattr(current["covariance"], attr), getattr(m9["covariance"], attr)
         ), attr
+
+
+def test_committed_feature_importance_top5_reproduces(real_cmapss_dir: Path) -> None:
+    """Top-5 sensors (test population) in reports/feature_importance.json reproduce from the
+    committed served model with the same seed and repeats (n_jobs=1 here; the result does not
+    depend on n_jobs)."""
+    import json
+
+    from predmaint.features.build import build_features, last_rows
+    from predmaint.models.explain import population_importance
+
+    report_path = Path("reports/feature_importance.json")
+    if not report_path.is_file():
+        pytest.skip("no feature-importance report (run scripts/train.py --explain)")
+    report = json.loads(report_path.read_text())
+    clear_model_cache()
+    model = load_model(get_settings().model_path)
+    assert report["model_version"] == model.model_version
+    data = load_fd001(real_cmapss_dir)
+    last = last_rows(build_features(data.test, model.required_sensors, model.window_size))
+    x = last[model.metadata["feature_names"]]
+    pop = population_importance(
+        model.pipeline,
+        x,
+        data.rul["rul"].to_numpy(dtype=float),
+        model.rul_cap,
+        n_repeats=report["n_repeats"],
+        seed=report["seed"],
+        n_jobs=1,
+    )
+    recorded = report["populations"]["test"]["per_sensor"][:5]
+    assert [r["name"] for r in pop["per_sensor"][:5]] == [r["name"] for r in recorded]
+    assert [r["mean"] for r in pop["per_sensor"][:5]] == pytest.approx(
+        [r["mean"] for r in recorded]
+    )
+    assert Path("models/model_feature_importance.json").read_text() == report_path.read_text()

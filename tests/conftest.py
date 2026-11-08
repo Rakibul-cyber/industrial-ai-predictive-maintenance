@@ -122,6 +122,7 @@ def served_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     The returned directory holds ``models/`` (incl. ``model.joblib``) and ``CMAPSSData/``.
     """
     from predmaint.models.anomaly import run_anomaly_training
+    from predmaint.models.explain import run_explanation
     from predmaint.models.intervals import run_interval_training
     from predmaint.models.train import run_training
 
@@ -167,6 +168,15 @@ def served_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
         verify_checksums=False,
         expected=None,
         healthy_min_rul=20,
+        echo=lambda _msg: None,
+    )
+    run_explanation(
+        data_dir,
+        root / "models",
+        root / "reports",
+        verify_checksums=False,
+        expected=None,
+        n_jobs=1,
         echo=lambda _msg: None,
     )
     return root

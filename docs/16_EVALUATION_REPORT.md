@@ -1,6 +1,6 @@
 # 16 — Evaluation Report
 
-All numbers in this report are read from the committed files [`reports/metrics_anomaly.json`](../reports/metrics_anomaly.json) (§10, smoothed §10d), [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) (§9), [`reports/metrics_baseline.json`](../reports/metrics_baseline.json), [`reports/metrics_primary.json`](../reports/metrics_primary.json), [`reports/model_comparison.json`](../reports/model_comparison.json), [`reports/residuals_by_rul_bucket.json`](../reports/residuals_by_rul_bucket.json) and [`models/model_metadata.json`](../models/model_metadata.json); the document was generated from them in Milestone 7. The served model is `primary-20261108-f4c86df`.
+All numbers in this report are read from the committed files [`reports/feature_importance.json`](../reports/feature_importance.json) (§11), [`reports/metrics_anomaly.json`](../reports/metrics_anomaly.json) (§10, smoothed §10d), [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) (§9), [`reports/metrics_baseline.json`](../reports/metrics_baseline.json), [`reports/metrics_primary.json`](../reports/metrics_primary.json), [`reports/model_comparison.json`](../reports/model_comparison.json), [`reports/residuals_by_rul_bucket.json`](../reports/residuals_by_rul_bucket.json) and [`models/model_metadata.json`](../models/model_metadata.json); the document was generated from them in Milestone 7. The served model is `primary-20261108-f4c86df`.
 
 ## 1. Dataset and protocol
 
@@ -272,4 +272,42 @@ Source: the `smoothing` and `smoothed` sections of [`reports/metrics_anomaly.jso
 | Train-OOF trend median (target > 0.7) | 0.680 | 0.693 |
 
 Same false-alarm rate, a marginally higher trend, but later and less complete detection: the remedy is rejected.
+
+## 11. Feature importance (Milestone 12, ADR-040)
+
+Source: [`reports/feature_importance.json`](../reports/feature_importance.json) (computed 2026-11-08T23:35:15Z for `primary-20261108-f4c86df`; `n_repeats` 10, seed 42). The full model card is [18](18_MODEL_CARD.md).
+
+**Method.** `sklearn.inspection.permutation_importance` on the served Pipeline as committed: no refit, and all model files are byte-identical. Importance = increase in RMSE (cycles) of the served, clamped predictions when one feature column is permuted, mean ± std over 10 repeats. Per-sensor and per-type values sum the member features within each repeat. HistGradientBoostingRegressor has no native `feature_importances_`. Sanity check: the served model's baseline RMSE on the test population is 16.610, the official test RMSE of §2.
+
+| Rank | Train sensor (17,731 rows, in-sample) | RMSE increase | Test sensor (100 engines) | RMSE increase |
+|---|---|---|---|---|
+| 1 | s_3 | 4.586 ± 0.045 | s_14 | 2.534 ± 0.844 |
+| 2 | s_14 | 4.181 ± 0.044 | s_3 | 1.884 ± 0.616 |
+| 3 | s_2 | 2.850 ± 0.037 | s_11 | 1.801 ± 0.603 |
+| 4 | s_9 | 2.556 ± 0.026 | s_13 | 1.382 ± 0.412 |
+| 5 | s_11 | 2.377 ± 0.026 | s_2 | 1.135 ± 0.513 |
+| 6 | s_13 | 2.359 ± 0.028 | s_7 | 1.097 ± 0.430 |
+| 7 | s_8 | 2.165 ± 0.034 | s_4 | 0.956 ± 0.422 |
+| 8 | s_12 | 2.020 ± 0.040 | s_8 | 0.699 ± 0.451 |
+| 9 | s_7 | 1.899 ± 0.032 | s_21 | 0.384 ± 0.141 |
+| 10 | s_4 | 1.616 ± 0.027 | s_17 | 0.199 ± 0.270 |
+| 11 | s_17 | 1.393 ± 0.016 | s_9 | 0.164 ± 0.532 |
+| 12 | s_15 | 1.072 ± 0.015 | s_20 | 0.131 ± 0.216 |
+| 13 | s_20 | 1.038 ± 0.018 | s_12 | 0.125 ± 0.472 |
+| 14 | s_21 | 0.584 ± 0.012 | s_15 | 0.030 ± 0.272 |
+
+| Feature type | Features | Train | Test |
+|---|---|---|---|
+| rolling mean | 14 | 15.807 ± 0.092 | 5.868 ± 1.304 |
+| rolling std | 14 | 12.043 ± 0.097 | 4.946 ± 1.143 |
+| cycle | 1 | 6.869 ± 0.055 | 2.991 ± 1.287 |
+| raw sensor | 14 | 2.846 ± 0.055 | 1.707 ± 0.747 |
+
+**Reading the results.**
+
+- **The two populations agree at the top.** `s_3` and `s_14` are the two most important sensors in both, and `s_2` and `s_11` are in both top fives. For test ranks 10–14 the std across repeats exceeds the mean (e.g. `s_9` 0.164 ± 0.532). With 100 engines that part of the ranking is noise.
+- **The model relies on smoothed signals, not raw readings.** Rolling means matter most, then rolling stds, then `cycle`, and raw sensor values least, in both populations. That supports the windowed feature design of ADR-005.
+- **`cycle` is the single most important feature on the test set** (top five: `cycle` 2.99, `s_14_roll_std` 1.85, `s_3_roll_mean` 1.82, `s_2_roll_mean` 1.06, `s_11_roll_std` 0.96). The model leans on engine age. In FD001 age is informative because every engine starts healthy and degrades under one operating condition (training lives 128–362 cycles, 04). The same reliance is a reason the model may transfer poorly to fleets with different life distributions.
+- **Ridge disagrees.** Its per-sensor |coefficient| order (s_13, s_8, s_9, s_7, s_14, s_15, s_4, s_2, s_12, s_11, s_17, s_20, s_21, s_3) has Spearman 0.226 (train) and 0.059 (test) with the permutation ranking; `s_3`, first for the boosted model on the training population, is last for Ridge. A linear model on correlated, standardized features spreads weight differently from trees, and coefficients are not importances. So the two views are not interchangeable, and neither is causal.
+- **What this does not show:** causal effects of sensors on degradation; importance for engines unlike FD001; stable rankings for the low-importance sensors.
 

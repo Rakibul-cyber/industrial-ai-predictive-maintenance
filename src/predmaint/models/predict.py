@@ -6,6 +6,7 @@ HTTP mapping belongs to the API layer (docs/06 §6).
 """
 
 import functools
+import json
 import logging
 import math
 from collections.abc import Mapping, Sequence
@@ -24,6 +25,7 @@ from predmaint.models.artifacts import load_artifacts
 SERVED_ARTIFACT = "model"
 INTERVAL_ARTIFACT = "model_intervals"
 ANOMALY_ARTIFACT = "model_anomaly"
+FEATURE_IMPORTANCE_FILE = "model_feature_importance.json"  # ADR-040 sidecar (JSON only)
 HealthStatus = Literal["critical", "warning", "healthy"]
 logger = logging.getLogger("predmaint.models")
 
@@ -390,6 +392,30 @@ def load_model(model_path: Path | None = None) -> LoadedModel:
     """
     target = (model_path or get_settings().model_path).resolve()
     return _load_cached(target)
+
+
+def feature_importance_path_for(model_path: Path) -> Path:
+    """The importance report lives next to the served model (ADR-040)."""
+    directory = model_path.parent if model_path.suffix == ".joblib" else model_path
+    return directory / FEATURE_IMPORTANCE_FILE
+
+
+def load_feature_importance(path: Path) -> dict[str, Any]:
+    """Read the feature-importance JSON written by ``scripts/train.py --explain``.
+
+    Raises:
+        ModelNotAvailableError: if the file is missing, unreadable or lacks required keys.
+    """
+    if not path.is_file():
+        raise ModelNotAvailableError(f"feature importance not found: {path}")
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ModelNotAvailableError(f"could not read feature importance {path}: {exc}") from exc
+    for key in ("for_model_version", "n_repeats", "seed", "populations"):
+        if key not in report:
+            raise ModelNotAvailableError(f"{path}: feature importance lacks {key!r}")
+    return report
 
 
 def clear_model_cache() -> None:

@@ -15,6 +15,7 @@ from predmaint.api.schemas import (
     AnomalyInfo,
     AnomalyResponse,
     CalibrationInfo,
+    FeatureImportanceInfo,
     IntervalsInfo,
     ModelInfoResponse,
     PredictRequest,
@@ -29,9 +30,11 @@ from predmaint.models.predict import (
     ModelNotAvailableError,
     anomaly_mismatch,
     anomaly_path_for,
+    feature_importance_path_for,
     interval_mismatch,
     interval_path_for,
     load_anomaly_model,
+    load_feature_importance,
     load_interval_model,
     load_model,
     predict_rul,
@@ -51,6 +54,7 @@ class ModelService:
         self.intervals: IntervalModel | None = None
         self.anomaly: AnomalyModel | None = None
         self.anomaly_error: str | None = "no point model loaded"
+        self.feature_importance: dict[str, Any] | None = None
 
     def load(self) -> None:
         """Load the model once; on failure keep running in degraded mode (ADR-022/028)."""
@@ -63,6 +67,24 @@ class ModelService:
         logger.info("Loaded model %s from %s", self.model.model_version, self.model_path)
         self._load_intervals(self.model)
         self._load_anomaly(self.model)
+        self._load_feature_importance(self.model)
+
+    def _load_feature_importance(self, model: LoadedModel) -> None:
+        """Load the matching importance report (ADR-040); otherwise warn and report null."""
+        path = feature_importance_path_for(self.model_path)
+        try:
+            report = load_feature_importance(path)
+        except ModelNotAvailableError as exc:
+            logger.warning("Feature importance not available: %s", exc)
+            return
+        if report["for_model_version"] != model.model_version:
+            logger.warning(
+                "Feature importance ignored: computed for %r, served model is %r",
+                report["for_model_version"],
+                model.model_version,
+            )
+            return
+        self.feature_importance = report
 
     def _load_anomaly(self, model: LoadedModel) -> None:
         """Load the matching anomaly detector; otherwise warn and leave /anomaly unavailable."""
@@ -182,6 +204,25 @@ class ModelService:
             sklearn_version_match=meta["library_versions"]["scikit-learn"] == sklearn.__version__,
             intervals=self._intervals_info(),
             anomaly=self._anomaly_info(),
+            feature_importance=self._feature_importance_info(),
+        )
+
+    def _feature_importance_info(self) -> FeatureImportanceInfo | None:
+        if self.feature_importance is None:
+            return None
+        report = self.feature_importance
+        test = report["populations"]["test"]
+        return FeatureImportanceInfo(
+            population="test (official FD001 test set, last cycle of each engine)",
+            target=test["target"],
+            n_rows=test["n_rows"],
+            n_repeats=report["n_repeats"],
+            seed=report["seed"],
+            baseline_rmse=test["baseline_rmse"],
+            top_features=test["per_feature"][:10],
+            per_sensor=test["per_sensor"],
+            caveat=test["caveat"],
+            computed_at=report["computed_at"],
         )
 
     def _anomaly_info(self) -> AnomalyInfo | None:

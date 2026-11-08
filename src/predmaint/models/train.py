@@ -363,8 +363,8 @@ def run_training(
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint used by ``scripts/train.py``. Returns a process exit code.
 
-    Usage: ``--model baseline``, ``--model primary``, ``--select``, then ``--model intervals``
-    and ``--model anomaly``.
+    Usage: ``--model baseline``, ``--model primary``, ``--select``, then ``--model intervals``,
+    ``--model anomaly`` and ``--explain``.
     """
     settings = get_settings()
     parser = argparse.ArgumentParser(
@@ -374,6 +374,9 @@ def main(argv: list[str] | None = None) -> int:
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--model", choices=(*MODEL_NAMES, "intervals", "anomaly"))
     action.add_argument("--select", action="store_true")
+    action.add_argument(
+        "--explain", action="store_true", help="permutation feature importance (ADR-040)"
+    )
     parser.add_argument("--data-dir", type=Path, default=settings.data_dir)
     parser.add_argument("--model-dir", type=Path, default=settings.model_dir)
     parser.add_argument("--reports-dir", type=Path, default=Path("reports"))
@@ -381,6 +384,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.select:
             promote(args.model_dir, args.reports_dir)
+        elif args.explain:
+            from predmaint.models.explain import run_explanation
+
+            run_explanation(args.data_dir / "raw" / "CMAPSSData", args.model_dir, args.reports_dir)
         elif args.model == "anomaly":
             from predmaint.models.anomaly import run_anomaly_training
 

@@ -332,3 +332,15 @@ def interval_coverage_table(intervals: Mapping[str, Any]) -> pd.DataFrame:
             "Uncalibrated (M8, for comparison)",
         ],
     )
+
+
+def importance_chart_frame(info: Mapping[str, Any] | None) -> pd.DataFrame | None:
+    """Per-sensor permutation importance (``/model/info.feature_importance``) as chart rows:
+    ``sensor, mean, std, lo, hi`` (lo/hi = mean ∓ std), sorted by mean; ``None`` if absent."""
+    rows = (info or {}).get("per_sensor")
+    if not rows:
+        return None
+    frame = pd.DataFrame(rows, columns=["name", "mean", "std"]).rename(columns={"name": "sensor"})
+    frame["lo"] = frame["mean"] - frame["std"]
+    frame["hi"] = frame["mean"] + frame["std"]
+    return frame.sort_values("mean", ascending=False).reset_index(drop=True)

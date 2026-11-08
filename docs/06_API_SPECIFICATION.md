@@ -2,7 +2,7 @@
 
 FastAPI app built by `predmaint.api.main:create_app()` (module-level `app` for uvicorn). Run it with `python -m predmaint.api.main`, which binds `$API_HOST:$API_PORT` (default `127.0.0.1:8000`), or with `uvicorn predmaint.api.main:app --host … --port …`. The served model is loaded once at startup from `$MODEL_PATH` (default `$MODEL_DIR/model.joblib`; env vars in [10](10_DEPLOYMENT_PLAN.md) §3). JSON only. No authentication, CORS or rate limiting (local MVP; ADR-012). Interactive docs at `/docs` (title, version from the package, description, and a real example request when the server runs from the repo root).
 
-All bodies below were copied from `curl` / TestClient output against the served model `primary-20261108-f4c86df` on 2026-11-08 (Milestone 4; interval fields from Milestone 8; `/anomaly`, `anomaly_loaded`, `/model/info.anomaly` from Milestone 9; calibrated bounds, `interval_calibrated`, `/model/info.intervals` calibration fields from Milestone 10; smoothed anomaly fields (inactive since the M11 close-out, ADR-039) and `api_version` 0.5.0 from Milestone 11).
+All bodies below were copied from `curl` / TestClient output against the served model `primary-20261108-f4c86df` on 2026-11-08 (Milestone 4; interval fields from Milestone 8; `/anomaly`, `anomaly_loaded`, `/model/info.anomaly` from Milestone 9; calibrated bounds, `interval_calibrated`, `/model/info.intervals` calibration fields from Milestone 10; smoothed anomaly fields (inactive since the M11 close-out, ADR-039) from Milestone 11; `/model/info.feature_importance` and `api_version` 0.6.0 from Milestone 12).
 
 ## 1. Endpoints
 
@@ -24,13 +24,13 @@ All bodies below were copied from `curl` / TestClient output against the served 
 With a model (200):
 
 ```json
-{"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.5.0","intervals_loaded":true,"anomaly_loaded":true}
+{"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.6.0","intervals_loaded":true,"anomaly_loaded":true}
 ```
 
 Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 
 ```json
-{"status":"degraded","model_loaded":false,"model_version":null,"api_version":"0.5.0","intervals_loaded":false,"anomaly_loaded":false}
+{"status":"degraded","model_loaded":false,"model_version":null,"api_version":"0.6.0","intervals_loaded":false,"anomaly_loaded":false}
 ```
 
 | Field | Type | Rule |
@@ -38,7 +38,7 @@ Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 | `status` | `"ok" \| "degraded"` | `degraded` when no model is loaded. |
 | `model_loaded` | bool | Whether `/predict` can serve. Readiness probes (M6 compose healthcheck) must check this field, not only the status code. |
 | `model_version` | string \| null | Served model version; `null` without a model. |
-| `api_version` | string | `predmaint.__version__` (0.2.0 since M8, 0.3.0 since M9, 0.4.0 since M10, 0.5.0 since M11). |
+| `api_version` | string | `predmaint.__version__` (0.2.0 since M8, 0.3.0 since M9, 0.4.0 since M10, 0.5.0 since M11, 0.6.0 since M12). |
 | `intervals_loaded` | bool | Whether a prediction-interval artifact matching the served model is loaded (ADR-034). |
 | `anomaly_loaded` | bool | Whether an anomaly detector matching the served model is loaded (ADR-035). Not part of the readiness check. |
 
@@ -146,7 +146,12 @@ The same call with `examples/predict_request.json` (31 records) returns the iden
  "anomaly": {"model_version": "anomaly-20261108-4734b37", "for_model_version": "primary-20261108-f4c86df", "method": "mahalanobis_ledoitwolf", "threshold": 5.40363364967852, "threshold_quantile": 0.99, "healthy_rows": 5329, "trained_at": "2026-11-08T21:00:02Z",
    "trend_median_train_oof": 0.6798250694250569, "false_alarm_rate_healthy": 0.010133233252017265, "detection_fraction_of_life_median": 0.7581860706860707, "detection_true_rul_median": 49.0, "never_flagged_fraction": 0.02, "acceptance_met": false,
    "smoothing": {"method": "ewm", "halflife": 10, "adjust": true}, "smoothing_enabled": false, "smoothed_threshold": 5.090594528745487, "smoothed_acceptance_met": false,
-   "evaluation_raw": {…}, "evaluation_smoothed": {…}}
+   "evaluation_raw": {…}, "evaluation_smoothed": {…}},
+ "feature_importance": {"population": "test (official FD001 test set, last cycle of each engine)", "target": "unclipped true RUL (RUL_FD001), the official test metric",
+   "n_rows": 100, "n_repeats": 10, "seed": 42, "baseline_rmse": 16.609852374016835,
+   "top_features": [{"name": "cycle", "mean": 2.991098310060003, "std": 1.2867173229649287}, {"name": "s_14_roll_std", "mean": 1.84647209719984, "std": 0.4950621016027734}, {"name": "s_3_roll_mean", "mean": 1.8241681737467625, "std": 0.6151378707234411}, …],
+   "per_sensor": [{"name": "s_14", "mean": 2.533728543772459, "std": 0.8440566806570736}, {"name": "s_3", "mean": 1.884199251451988, "std": 0.6157038299411721}, {"name": "s_11", "mean": 1.8010932931522325, "std": 0.6029186361900506}, … 14 entries],
+   "caveat": "out-of-sample but only 100 rows: noisy, see std across repeats", "computed_at": "2026-11-08T23:35:15Z"}
 }
 ```
 
@@ -156,7 +161,7 @@ All fields come from `model_metadata.json` (05 §9), except `n_features` (= `len
 
 ### 4.3 Required fields (FR-012)
 
-`model_name, model_version, trained_at, git_sha, selected_by, data_subset, train_sha256, window_size, rul_cap, n_features, required_sensors, feature_names, health_bands, metrics, sklearn_version_match`, plus `intervals` (object or `null`, ADR-034; `cv_oof`/`test` are the uncalibrated v1.1 numbers, and since M10 `calibrated`, `conformal_q`, `alpha` and `calibration` (before/after coverage, FR-020 verdict, exchangeability caveat; `null` for uncalibrated metadata) are added per ADR-037) and `anomaly` (object or `null`, ADR-035; fields from `model_anomaly_metadata.json`: version, method, OOF threshold, healthy-row count and the headline **raw** train-OOF evaluation incl. `acceptance_met` (FR-019); since M11 also `smoothing`, `smoothing_enabled` (`false` since ADR-039), `smoothed_threshold`, `smoothed_acceptance_met` (FR-021) and the full `evaluation_raw` / `evaluation_smoothed` objects, identical to the `evaluation` and `smoothed.evaluation` sections of `reports/metrics_anomaly.json`, abbreviated `{…}` above).
+`model_name, model_version, trained_at, git_sha, selected_by, data_subset, train_sha256, window_size, rul_cap, n_features, required_sensors, feature_names, health_bands, metrics, sklearn_version_match`, plus `intervals` (object or `null`, ADR-034; `cv_oof`/`test` are the uncalibrated v1.1 numbers, and since M10 `calibrated`, `conformal_q`, `alpha` and `calibration` (before/after coverage, FR-020 verdict, exchangeability caveat; `null` for uncalibrated metadata) are added per ADR-037) and `anomaly` (object or `null`, ADR-035; fields from `model_anomaly_metadata.json`: version, method, OOF threshold, healthy-row count and the headline **raw** train-OOF evaluation incl. `acceptance_met` (FR-019); since M11 also `smoothing`, `smoothing_enabled` (`false` since ADR-039), `smoothed_threshold`, `smoothed_acceptance_met` (FR-021) and the full `evaluation_raw` / `evaluation_smoothed` objects, identical to the `evaluation` and `smoothed.evaluation` sections of `reports/metrics_anomaly.json`, abbreviated `{…}` above). Since M12 also `feature_importance` (object or `null`, ADR-040): the **test**-population permutation importance from `models/model_feature_importance.json` (identical to `reports/feature_importance.json`). It carries the population label, target, n_rows, n_repeats, seed, the served model's baseline RMSE on that population, the top 10 features and all 14 sensors (RMSE increase in cycles, mean and std over repeats), the caveat and `computed_at`. It is `null`, with a logged warning, when the file is absent, unreadable or computed for another model version; nothing else changes.
 
 ## 4a. `POST /anomaly` (M9, ADR-035; smoothing evaluated in M11, not served, ADR-038/039)
 

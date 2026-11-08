@@ -9,7 +9,7 @@ Style: **modular monolith** — one Python package `predmaint` (under `src/`), C
 | Config | `predmaint/config.py` | Single source of defaults (`rul_cap`, `window_size`, seeds, band thresholds, paths) and env-var overrides. | Hold secrets. |
 | Data | `predmaint/data/` | Download + checksum (`download.py`), parse raw files (`load.py`), validate data contract (`validate.py`), compute labels (`labels.py`). | Engineer features. |
 | Features | `predmaint/features/build.py` | Sensor selection, causal rolling features, "last row per unit" extraction. **Single code path used by training, evaluation and the API.** | Fit models. |
-| Models | `predmaint/models/` | Model definitions + 12-config search grid (`registry.py`), CV + training + evaluation (`train.py`), metrics (`metrics.py`), artifact save/load + metadata (`artifacts.py`), ADR-024 selection and promotion (`selection.py`), prediction-interval training/evaluation (`intervals.py`, M8), anomaly-detector training/evaluation (`anomaly.py`, M9), inference contract incl. interval bounds and anomaly scoring (`predict.py`). | Know about HTTP. |
+| Models | `predmaint/models/` | Model definitions + 12-config search grid (`registry.py`), CV + training + evaluation (`train.py`), metrics (`metrics.py`), artifact save/load + metadata (`artifacts.py`), ADR-024 selection and promotion (`selection.py`), prediction-interval training/evaluation (`intervals.py`, M8), anomaly-detector training/evaluation (`anomaly.py`, M9), permutation feature importance (`explain.py`, M12), inference contract incl. interval bounds and anomaly scoring (`predict.py`). | Know about HTTP. |
 | API | `predmaint/api/` | FastAPI app (`main.py`), Pydantic schemas (`schemas.py`), model-holder service (`service.py`), error envelope (`errors.py`). Endpoints `/health`, `/predict`, `/anomaly` (M9), `/model/info`. | Train models or read raw data files. |
 | Dashboard | `predmaint/dashboard/` | Streamlit UI (`app.py`), a thin HTTP client returning typed results (`api_client.py`), and display helpers (`helpers.py`: true RUL, request bodies, trajectory sampling). | Import model, feature, inference or API-server code, or compute predictions. |
 | CLI scripts | `scripts/` | Thin entrypoints (`download_data.py`, `train.py`, `make_request_payload.py`) that call package functions, plus the Docker smoke test `smoke_test.sh`. | Contain logic. |
@@ -37,6 +37,7 @@ flowchart LR
     ART -->|committed, baked into image| API[api: FastAPI :8000<br/>/predict, /anomaly]
     IART -->|for_model_version check| API
     AART -->|for_model_version check| API
+    FIMP[(models/model_feature_importance.json<br/>scripts/train.py --explain, M12)] -->|for_model_version check| API
     API -->|features.build + models.predict| API
     DASH[dashboard: Streamlit :8501] -->|HTTP JSON<br/>API_BASE_URL| API
     NASA -->|first start: download_data.py<br/>into ./data bind mount| DASH
@@ -96,6 +97,7 @@ Confirmed in M5 (the API server log shows the dashboard's real calls; 14 §M5):
 | Failure | Behaviour |
 |---|---|
 | Artifact or metadata missing/corrupt at startup | API still starts; logs a WARNING; `/health` → 200 with `model_loaded: false` (ADR-028); `/predict`, `/model/info` → 503 `MODEL_UNAVAILABLE`. Compose healthcheck stays unhealthy. |
+| Feature-importance file missing, unreadable or for another model version (M12) | API logs a WARNING; `/model/info.feature_importance` is `null`; nothing else changes. |
 | Interval or anomaly artifact missing, corrupt or for another model version | API logs a WARNING and serves without it: null interval fields (M8); `/anomaly` → 503 `ANOMALY_UNAVAILABLE` and `/health.anomaly_loaded: false` (M9). `/predict` and the healthcheck are unaffected. |
 | Invalid request body | 422 `VALIDATION_ERROR` with field-level details. |
 | Business-rule violation | 422 with `INSUFFICIENT_CYCLES`, `MISSING_SENSORS`, or `NON_CONSECUTIVE_CYCLES`. |

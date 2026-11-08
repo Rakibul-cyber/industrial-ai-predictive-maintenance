@@ -6,7 +6,7 @@ Talking points grounded in the implemented system. Numbers come from `reports/*.
 
 **Industrial AI — Predictive Maintenance Platform** (Python, scikit-learn, FastAPI, Streamlit, Docker, GitHub Actions).
 End-to-end remaining-useful-life prediction on NASA C-MAPSS FD001: checksummed data pipeline, leakage-safe rolling features, engine-grouped CV, and a HistGradientBoosting model selected on CV over a Ridge baseline (test RMSE 16.61 vs 19.14 cycles), plus quantile-regression prediction intervals and an unsupervised anomaly score, both evaluated and reported honestly, including where they fall short.
-Served via a validated FastAPI service (p95 13.6 ms) and a Streamlit dashboard; Docker Compose with readiness healthchecks; 285 tests, 96 % coverage, CI with a Docker smoke test on amd64.
+Served via a validated FastAPI service (p95 13.6 ms) and a Streamlit dashboard; Docker Compose with readiness healthchecks; 305 tests, 97 % coverage, CI with a Docker smoke test on amd64.
 
 ## 60-second summary
 
@@ -81,13 +81,22 @@ The raw score's median trend was 0.680 against a target of 0.7 that was on recor
 
 It failed: 0.693. The side-by-side evaluation then showed the real cost. 16 % of training engines were never flagged, against 2 % raw; detection came 5 cycles later; and fewer near-failure test engines were flagged. So I didn't ship it. The API serves the raw score again, and the smoothing code, threshold and evaluation stay in the repo behind `smoothing_enabled: false` as a documented negative result. The general point: a remedy that nudges the headline metric while making the system worse at its job is not an improvement, and you only see that if you measure more than the headline metric.
 
+**15. Which sensors matter, and how do you know?** (M12)
+I measured how much the served model relies on each input with permutation importance: shuffle one column, re-score, and see how much the RMSE grows, 10 times per feature, without refitting. I did it on two populations because each has a weakness:
+- **Training rows (17,731):** in-sample, so the error level is optimistic, but the ranking is stable.
+- **The 100 test engines:** out-of-sample, but noisy, so I report the spread across repeats.
+
+Both put `s_3` and `s_14` on top. Rolling means and stds matter more than raw readings, and on the test set `cycle` (engine age) is the single biggest feature. That fits the windowed design but is also a transfer risk. Below the top handful, the test-set ranking is within noise, and I say so rather than ranking 14 sensors precisely.
+
+As a cross-check I compared against the Ridge baseline's standardized coefficients. They barely agree (Spearman 0.23 / 0.06): `s_3` is first for the trees and last for Ridge. That's a useful lesson. Coefficients on correlated, standardized features are not importances, and permutation importance is about the model's reliance, not causation. Everything is in a model card whose tables are generated from committed files and checked by a test.
+
 ## Strongest points
 
 - An honest evaluation protocol: grouped CV, test used only for reporting, residuals analysed by RUL range, limitations stated.
 - No train/serve skew by construction, backed by contract tests.
 - Reproducibility: checksummed data, pinned dependencies, deterministic training, byte-identical retrain from a fresh clone.
 - Production habits at small scale: one error envelope, degraded mode, readiness healthchecks, non-root digest-pinned image, CI with a container smoke test.
-- A full decision trail: 38 ADRs and 12 change records.
+- A full decision trail: 39 ADRs and 13 change records, plus a model card (doc 18) whose numbers trace to committed files.
 
 ## Weakest points
 

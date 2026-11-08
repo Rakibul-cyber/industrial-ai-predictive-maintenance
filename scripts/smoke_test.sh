@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Docker smoke test (docs/09, M6/M8/M9/M10/M11): build the image, start compose, wait for both
+# Docker smoke test (docs/09, M6/M8–M12): build the image, start compose, wait for both
 # healthchecks, check /health (model + intervals + anomaly loaded), POST the late-life example and
 # assert its recorded critical result, rul_lower <= predicted_rul <= rul_upper (ADR-034) and
 # interval_calibrated (ADR-037),
@@ -91,6 +91,15 @@ assert early["smoothed"] is False and late["smoothed"] is False, (early, late)
 assert late["cycles_in_smoothing"] is None, late
 assert late["normalized_score"] == late["raw_normalized_score"] == 1.1015, late
 assert early["normalized_score"] < late["normalized_score"], (early, late)
+PY
+
+echo "== GET /model/info (feature importance baked into the image, ADR-040)"
+info=$(curl -fsS "$API/model/info") || fail "/model/info request failed"
+python3 - "$info" <<'PY' || fail "/model/info has no feature_importance block"
+import json, sys
+fi = json.loads(sys.argv[1])["feature_importance"]
+assert fi is not None and fi["n_rows"] == 100 and len(fi["per_sensor"]) == 14, fi
+print("   feature_importance: top sensor", fi["per_sensor"][0]["name"], "n_repeats", fi["n_repeats"])
 PY
 
 echo "== GET dashboard /_stcore/health"
