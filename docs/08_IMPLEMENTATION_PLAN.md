@@ -47,34 +47,38 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** checksums match 04 §3; all tests pass (real-data test executed, not skipped, locally); ruff clean; `pip check` clean; licence outcome recorded; CI workflow file present (CI run result recorded in 14 once a push is authorized).
 - **Estimated effort:** 4 h · **Status:** Complete 2026-11-08 (awaiting user review; uncommitted). Evidence in 14. CI run itself pending an authorized push (U5).
 
-## M2 — Labels and feature engineering
+## M2 — Labels, features, baseline training and evaluation (re-scoped by CR-002)
 
-- **Objective:** leakage-free labels and features via one reusable code path.
+- **Objective:** leakage-free labels and features via one reusable code path; a trained, cross-validated, test-evaluated Ridge baseline with saved artifact and committed metrics report.
 - **Dependencies:** M1.
-- **Requirements:** FR-004, FR-005.
-- **Files to create:** `src/predmaint/data/labels.py`, `src/predmaint/features/__init__.py`, `src/predmaint/features/build.py`, `tests/test_labels.py`, `tests/test_features.py`.
-- **Files to modify:** `docs/04_DATASET_SPECIFICATION.md` (sensor table), `docs/13_DECISION_LOG.md` (ADR-005 confirmation), `docs/14_PROJECT_STATUS.md`.
+- **Requirements:** FR-004, FR-005, FR-006, FR-008 (baseline), NFR-007.
+- **Files to create:** `src/predmaint/data/labels.py`, `src/predmaint/features/__init__.py`, `src/predmaint/features/build.py`, `src/predmaint/models/__init__.py`, `registry.py`, `metrics.py`, `train.py`, `artifacts.py`, `predict.py` (clamp step only; under `src/predmaint/models/`), `scripts/train.py`, `reports/metrics_baseline.json` (generated, committed), `tests/test_labels.py`, `tests/test_features.py`, `tests/test_metrics.py`, `tests/test_train.py`.
+- **Files to modify:** `src/predmaint/data/validate.py` (`expected=None` for synthetic runs), `tests/conftest.py` (synthetic training fixture), `tests/test_real_data.py` (sensor list), `.gitignore`, `README.md`, `CLAUDE.md` (warnings policy), docs 01, 04, 05, 07, 08, 09, 12, 13, 14, 15.
 - **Tasks:**
-  - M2-T1 **UNVERIFIED item — near-constant sensors:** compute std and unique count of `s_1..s_21` on `train_FD001` with a one-off command; record the table and resulting kept/dropped lists in 04; confirm or amend ADR-005 via 15.
-  - M2-T2 `labels.py`: `add_rul(df, rul_cap)`.
-  - M2-T3 `build.py`: `select_sensors(train_df) -> list[str]`, `build_features(df, sensors, window_size) -> DataFrame` (adds `cycle` + raw/roll_mean/roll_std, drops rows with `cycle < window_size`), `last_rows(features_df) -> DataFrame`, `feature_names(sensors) -> list[str]`.
-  - M2-T4 Tests: RUL formula/clip/None; rolling values vs hand-computed; causality (mutate future rows → past features unchanged); per-unit isolation (no window crosses units); eligibility filter; feature order; selection rule on synthetic constant/near-constant columns.
+  - [x] M2-T1 Near-constant sensors on real `train_FD001`: table recorded in 04 §5a; ADR-005 rule confirmed (7 dropped, 14 kept).
+  - [x] M2-T2 `labels.py`: `add_rul(df, rul_cap)`.
+  - [x] M2-T3 `build.py`: `sensor_stats`, `select_sensors`, `feature_names`, `build_features(df, sensors, window_size, keep)`, `last_rows`.
+  - [x] M2-T4 `registry.py` (`make_baseline`, `make_model`), `metrics.py` (`mae`, `rmse`, `nasa_score`), `artifacts.py` (`save_artifacts`, `load_artifacts`), `predict.py` (`predict_from_features`, clamp ≥ 0), `train.py` (checksum gate, GroupKFold CV, final fit, test evaluation, metadata, report), `scripts/train.py --model baseline`.
+  - [x] M2-T5 Tests: labels; features (values, row count, columns, isolation, truncation invariance, trailing-window-only invariance, order independence, selection rule); metrics (hand values, NASA asymmetry); training (disjoint folds, end-to-end save/reload/predict, metadata fields, reproducibility, checksum gate, artifact errors); real-data sensor list.
 - **Verification commands:**
 
   ```bash
-  pytest -v tests/test_labels.py tests/test_features.py
-  pytest -v && ruff check . && ruff format --check .
+  ruff check . && ruff format --check .
+  pytest -q
+  python scripts/train.py --model baseline
+  pytest -q --cov=predmaint
   ```
 
-- **Acceptance criteria:** all tests pass; sensor table recorded in 04 from real data; feature count = 1 + 3 × len(kept sensors).
-- **Estimated effort:** 3 h · **Status:** Not started.
+- **Acceptance criteria:** all tests pass (real-data tests executed locally); sensor table recorded in 04 from real data; feature count = 1 + 3 × len(kept sensors); baseline CV and official-test MAE/RMSE/NASA score from an actual run recorded in 05 §7a and 14; `reports/metrics_baseline.json` written.
+- **Estimated effort:** 5 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
 
 ## M3 — Training, evaluation, artifacts, inference contract
 
 - **Objective:** real CV and test metrics for both models; selected artifact + metadata; shared inference function.
 - **Dependencies:** M2.
-- **Requirements:** FR-006, FR-007, FR-008, FR-009, NFR-001, NFR-002, NFR-007.
-- **Files to create:** `src/predmaint/models/__init__.py`, `registry.py`, `metrics.py`, `train.py`, `artifacts.py`, `predict.py` (all under `src/predmaint/models/`), `scripts/train.py`, `tests/test_metrics.py`, `tests/test_train.py`, `tests/test_inference_contract.py`.
+- **Requirements:** FR-007, FR-008 (primary), FR-009, NFR-001, NFR-002.
+- **Files to create:** `reports/metrics_primary.json` (generated), `tests/test_inference_contract.py`.
+- **Files to extend (created in M2):** `src/predmaint/models/registry.py` (`make_primary`), `train.py` (primary candidate, ADR-010 selection, served `model.joblib` + `model_metadata.json`), `predict.py` (full inference contract), `tests/test_train.py`.
 - **Files to modify:** `tests/conftest.py` (tiny-model fixture), `docs/14_PROJECT_STATUS.md` (actual metrics, runtime), `docs/05_ML_DESIGN.md` only if a documented detail proves wrong (via 15).
 - **Tasks:**
   - M3-T1 `registry.py`: `make_baseline()`, `make_primary(seed)` per 05 §2–3.
@@ -209,8 +213,8 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 | Milestone | Requirements |
 |---|---|
 | M1 | FR-001, FR-002, FR-003, NFR-004, NFR-006, NFR-008 |
-| M2 | FR-004, FR-005 |
-| M3 | FR-006, FR-007, FR-008, FR-009, NFR-001, NFR-002, NFR-007 |
+| M2 | FR-004, FR-005, FR-006, FR-008 (baseline), NFR-007 |
+| M3 | FR-007, FR-008 (primary), FR-009, NFR-001, NFR-002 |
 | M4 | FR-010, FR-011, FR-012, FR-013, NFR-003, NFR-010 |
 | M5 | FR-014, FR-015, FR-016 |
 | M6 | FR-017 |

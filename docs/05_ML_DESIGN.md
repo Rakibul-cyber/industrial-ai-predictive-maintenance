@@ -6,29 +6,31 @@ Regress **RUL in cycles** for an FD001 engine from its observed sensor history, 
 
 ## 2. Baseline model (ADR-006)
 
-`Pipeline([("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))])`. Interpretable, fast, and sets the bar the primary model must beat.
+`Pipeline([("select", ColumnTransformer([("features", "passthrough", feature_names)], remainder="drop")), ("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))])`. Interpretable, fast, and sets the bar the primary model must beat. The leading `select` step (ADR-023) stores the training-time feature list — and therefore the kept sensors — inside the artifact and rejects inputs missing any of those columns; the scaler is fitted inside the pipeline, i.e. on training rows only (per CV fold, and on the full training set for the final fit).
 
 ## 3. Primary model (ADR-007)
 
-`HistGradientBoostingRegressor(early_stopping=False, random_state=42)`, all other hyperparameters at scikit-learn 1.9.1 defaults (no scaler). Hyperparameters are fixed a priori — no tuning in the MVP. `early_stopping=False` because the estimator's internal validation split would be row-wise, mixing cycles of the same engine.
+`HistGradientBoostingRegressor(early_stopping=False, random_state=42)`, all other hyperparameters at scikit-learn 1.9.1 defaults (no scaler; same leading `select` step as the baseline). Hyperparameters are fixed a priori — no tuning in the MVP. `early_stopping=False` because the estimator's internal validation split would be row-wise, mixing cycles of the same engine.
 
 ## 4. Feature strategy (ADR-005)
 
 Config defaults: `WINDOW_SIZE = 30`, `RUL_CAP = 125`. Both constants are defined **once**, in `predmaint/config.py`, and imported by training (`models/train.py`), feature building (`features/build.py`), and inference (`models/predict.py` / API); no module re-declares them. Training writes the values used into metadata (`config.window_size`, `config.rul_cap`), and inference uses the metadata values so a served model always matches how it was trained. Lower-case `window_size` / `rul_cap` below refer to these values.
 
 1. **Candidate columns:** `s_1 … s_21`. `setting_1..3` are excluded (FD001 has one operating condition per readme).
-2. **Sensor drop rule (train only):** drop a sensor if it has **≤ 2 unique values** in `train_FD001`. The kept list is computed in M2 on real data, printed with each sensor's std and unique count, and recorded in [04](04_DATASET_SPECIFICATION.md) and metadata (`required_sensors`, `dropped_columns`). If inspection shows the rule misclassifies a sensor, the rule is amended through [15](15_CHANGE_CONTROL.md) — not silently.
+2. **Sensor drop rule (train only):** drop a sensor if it has **≤ 2 unique values** in `train_FD001`. The kept list is computed in M2 on real data, printed with each sensor's std and unique count, and recorded in [04](04_DATASET_SPECIFICATION.md) and metadata (`required_sensors`, `dropped_columns`). If inspection shows the rule misclassifies a sensor, the rule is amended through [15](15_CHANGE_CONTROL.md) — not silently. **Confirmed on real data in M2** (04 §5a): drops `s_1, s_5, s_6, s_10, s_16, s_18, s_19`, keeps 14 sensors → 43 features.
 3. **Per kept sensor `s`, per row (computed within each unit, trailing only):**
    - `s` — raw value at the current cycle
    - `s_roll_mean` — mean of the last `window_size` rows (inclusive of current)
    - `s_roll_std` — sample std (`ddof=1`) of the last `window_size` rows
+
+   Semantics equal pandas `rolling(window_size, min_periods=window_size)` per unit. The implementation computes each window independently (NumPy `sliding_window_view`), not with a running accumulator, so a cycle's feature row is bit-identical whether or not later cycles — or cycles older than the window — are present (tested).
 4. **`cycle`** — the current cycle number (observed engine age; available at inference).
-5. **Row eligibility:** a row gets features only if `cycle ≥ window_size` (full window). Training drops earlier rows (≈ 29 × 100 = 2,900 of 20,631); inference requires ≥ `window_size` records. Train and serve therefore see identical feature semantics.
+5. **Row eligibility:** a row gets features only if a full trailing window of `window_size` rows of the same unit exists (`min_periods = window_size`); for histories starting at cycle 1 this is exactly `cycle ≥ window_size`. Training drops earlier rows (≈ 29 × 100 = 2,900 of 20,631); inference requires ≥ `window_size` records. Train and serve therefore see identical feature semantics.
 6. **Feature order** = `["cycle"] + [f for s in required_sensors for f in (s, f"{s}_roll_mean", f"{s}_roll_std")]`, stored in metadata as `feature_names` and enforced at inference.
 
 All of this is implemented once in `predmaint/features/build.py` and reused by training, evaluation, and the API.
 
-## 5. Training procedure (`scripts/train.py`)
+## 5. Training procedure (`scripts/train.py --model <name>`)
 
 1. Verify FD001 checksums (04 §3) → load → validate.
 2. Labels: `RUL = max_cycle − cycle`, clipped at `rul_cap`.
@@ -36,7 +38,7 @@ All of this is implemented once in `predmaint/features/build.py` and reused by t
 4. CV: `GroupKFold(n_splits=5)` with `groups=unit`, for each candidate → per-fold MAE/RMSE, mean and std.
 5. Fit each candidate on all eligible training rows.
 6. Test: build features over each test unit's full observed history, take its last row (all 100 units have ≥ 31 cycles ≥ `window_size`), predict, clamp at 0, compare with `RUL_FD001`.
-7. Selection (§8) → save artifact + metadata (§9). Print a metrics table to stdout.
+7. Save the candidate's artifact, metadata and committed report (§9); print the dropped-sensor list, per-fold CV, and test metrics. Selection (§8) and the served artifact follow in M3.
 
 ## 6. Reproducibility controls
 
@@ -62,13 +64,33 @@ Reported metric sets:
 - `test`: MAE, RMSE, NASA score vs **unclipped** `RUL_FD001` (primary).
 - `test_clipped_truth`: MAE/RMSE vs `min(RUL_FD001, rul_cap)` — for comparability with literature that clips test truth; not used for selection.
 
-No metric value is assumed or targeted in advance; actual values are recorded in [14](14_PROJECT_STATUS.md) after M3.
+No metric value is assumed or targeted in advance; actual values are recorded in [14](14_PROJECT_STATUS.md).
+
+### 7a. Measured baseline (Ridge) — measured 2026-11-08T14:50:35Z
+
+Provenance: code = commit `4e8c04c` plus the uncommitted Milestone 2 working tree (`git_dirty: true` in the report), `model_version` `ridge-20261108T145035Z`, Python 3.13.3, scikit-learn 1.9.1; data SHA-256 per 04 §3. Source: [reports/metrics_baseline.json](../reports/metrics_baseline.json). Two consecutive runs produced identical metrics.
+
+| Metric set | MAE | RMSE | NASA score |
+|---|---|---|---|
+| CV, 5-fold GroupKFold by unit, capped labels (mean ± std, ddof=1) | 15.504 ± 1.052 | 19.287 ± 1.181 | — |
+| **Official test, 100 units, last cycle, unclipped truth (primary)** | **15.403** | **19.205** | 595.2 |
+| Official test, truth clipped at 125 (literature comparability only) | 14.333 | 17.910 | — |
+
+Training rows: 17,731 of 20,631 (rows without a full 30-cycle window dropped). Per-fold RMSE: 20.933, 19.183, 19.474, 17.609, 19.234. CV and test agree closely, so there is no leakage signal; the result lies within the expected 15–30 RMSE sanity band for simple regressors. The baseline was not tuned.
 
 ## 8. Model selection rule (ADR-010)
 
 The primary model is selected **only if** its `test.mae < baseline test.mae` **and** `test.rmse < baseline test.rmse`. Otherwise the baseline is shipped. The NASA score and CV metrics play no part in this decision. The decision and both candidates' metrics are written to metadata (`selected`, `selection_reason`).
 
-## 9. Artifact format and metadata schema (ADR-011)
+## 9. Artifact format and metadata schema (ADR-011, ADR-023)
+
+**Per-candidate artifacts (from M2):** `scripts/train.py --model <name>` writes
+
+- `models/<name>.joblib` — the fitted sklearn `Pipeline` (select → [scaler] → estimator), gitignored;
+- `models/<name>_metadata.json` — gitignored; same fields as the schema below except that `metrics` is the candidate's own block (`cv`, `test`, `test_clipped_truth`, `n_train_rows`, `n_test_units`) and there is no `selected` / `selection_reason`; adds `estimator` (`"ridge"`) and `git_dirty`;
+- `reports/metrics_<name>.json` — **committed**; a subset of the metadata (identity, provenance, config, sensors, metrics).
+
+**Served artifact (M3):** after ADR-010 selection, M3 writes the files the API loads:
 
 - `models/model.joblib` — the fitted sklearn `Pipeline` of the selected candidate (`joblib.dump`).
 - `models/model_metadata.json`:

@@ -11,9 +11,9 @@ Each requirement has a measurable acceptance criterion and traces to the milesto
 | FR-003 | Validate loaded data. | Validation fails (raises) on: wrong column count, any null, non-integer unit/cycle, cycles not starting at 1 or not strictly +1 per unit, RUL row count ≠ test unit count. Real FD001 passes. | M1 |
 | FR-004 | Compute RUL training labels. | `RUL = max_cycle(unit) − cycle`, clipped at `rul_cap` (default 125, configurable). Unit tests: last cycle → 0; clip applied; unclipped when `rul_cap=None`. | M2 |
 | FR-005 | Engineer features causally. | Sensors selected by the rule in [05](05_ML_DESIGN.md) §4; for each kept sensor: raw value, trailing rolling mean and std over `window_size` (default 30) rows of the same unit; plus `cycle`. Unit test proves changing rows after cycle *t* does not change features at *t*. | M2 |
-| FR-006 | Train and cross-validate a baseline. | StandardScaler + Ridge evaluated with 5-fold GroupKFold by `unit`; per-fold and mean±std MAE/RMSE recorded in metadata. | M3 |
+| FR-006 | Train and cross-validate a baseline. | StandardScaler + Ridge evaluated with 5-fold GroupKFold by `unit`; per-fold and mean±std MAE/RMSE recorded in metadata. | M2 |
 | FR-007 | Train and cross-validate a primary model. | HistGradientBoostingRegressor with fixed hyperparameters, same CV protocol and outputs as FR-006. | M3 |
-| FR-008 | Evaluate on the official test set. | For each of 100 test units, predict at the last observed cycle; report MAE, RMSE (primary) and NASA score (secondary) against `RUL_FD001.txt`. | M3 |
+| FR-008 | Evaluate on the official test set. | For each of 100 test units, predict at the last observed cycle; report MAE, RMSE (primary) and NASA score (secondary) against `RUL_FD001.txt`. | M2, M3 |
 | FR-009 | Select and persist the model. | Selection per ADR-010; `models/model.joblib` + `models/model_metadata.json` written with all fields of [05](05_ML_DESIGN.md) §9. | M3 |
 | FR-010 | `GET /health`. | 200 with `model_loaded: true` when artifact loaded; 503 with error envelope otherwise. | M4 |
 | FR-011 | `POST /predict`. | Valid request ([06](06_API_SPECIFICATION.md)) returns 200 with `predicted_rul`, `health_band`, `model_version`; value equals offline inference on the same input (contract test). | M4 |
@@ -34,7 +34,7 @@ Each requirement has a measurable acceptance criterion and traces to the milesto
 | NFR-004 | Code quality | `ruff check .` and `ruff format --check .` pass; public functions have type hints and docstrings. Enforced in CI from M1. | M1 |
 | NFR-005 | Test coverage | Line coverage ≥ 80 % for `src/predmaint`, excluding `dashboard/app.py` (Streamlit UI layer). | M7 (tracked from M3) |
 | NFR-006 | Configuration & secrets | All runtime config via environment variables documented in `.env.example`; no secrets or absolute paths in code. | M1 |
-| NFR-007 | Data integrity | Training refuses to run if FD001 checksums do not match [04](04_DATASET_SPECIFICATION.md) §3. | M3 |
+| NFR-007 | Data integrity | Training refuses to run if FD001 checksums do not match [04](04_DATASET_SPECIFICATION.md) §3. | M2 |
 | NFR-008 | Pinned dependencies | All runtime and dev dependencies pinned to the versions in [03](03_TECH_STACK.md); `pip check` passes in a fresh venv. | M1 |
 | NFR-009 | Documentation fidelity | Every command in README and docs 08/10 executed successfully in M7; results recorded in 14. | M7 |
 | NFR-010 | Artifact safety | API loads artifacts only from the configured local `MODEL_DIR` (joblib = pickle; never from user input or network). | M4 |

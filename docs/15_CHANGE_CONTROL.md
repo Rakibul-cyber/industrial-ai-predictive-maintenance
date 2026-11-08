@@ -48,3 +48,15 @@ Append to the "Change records" section below **before** implementing, and get us
 | Affected docs | 03 (requests row), 09 §3 (download tests use local HTTP server), 14. |
 | Regression tests | `tests/test_download.py` now serves archives over a local HTTP server (exercises the `requests` path, incl. HTTP 404 → `DownloadError`); `RUN_NETWORK_TESTS=1` live test passes. |
 | Approval | Defect fix within authorized milestone (M1). |
+
+### CR-002 — Baseline training and evaluation moved from M3 into M2 (2026-11-08)
+
+| Field | Content |
+|---|---|
+| Reason | Explicit user request (§1.4), in the Milestone 2 authorization message. |
+| Evidence | That message specifies M2 = preprocessing, features, baseline training, CV, official-test evaluation, `models/baseline.joblib` + `models/baseline_metadata.json`, committed `reports/metrics_baseline.json`, and the kept-sensor list stored in the preprocessing artifact. Doc 08 had placed training in M3. |
+| Impact | 08 (M2/M3 scope and traceability), 01 (FR-006, FR-008, NFR-007 milestones), 05 §2/§4/§5/§7a/§9, 07 (`reports/`, per-candidate files), 09 §4, 13 (ADR-023). Served-model API contract unchanged. |
+| Smallest fix | Re-scope milestones; per-candidate artifact naming alongside the unchanged served artifact; built-in `ColumnTransformer` select step to carry the feature list. Entrypoint kept as `scripts/train.py --model baseline` (the name in 08, permitted by the request). |
+| Affected docs | 01, 05, 07, 08, 09, 13, 14. |
+| Regression tests | `tests/test_train.py` (end-to-end save/reload/predict, pipeline feature list == metadata, missing feature column rejected), `tests/test_real_data.py` (sensor list). |
+| Approval | Requested by the user on 2026-11-08 (M2 authorization). |

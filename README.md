@@ -2,7 +2,7 @@
 
 Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS **FD001** dataset, served through a FastAPI service and a Streamlit dashboard.
 
-**Status:** Milestone 1 (data acquisition & validation) implemented; no model, API, or dashboard yet. A CI badge will be added once the GitHub Actions workflow has run on `main`. This README is finalised in Milestone 7.
+**Status:** Milestones 1–2 implemented (data acquisition & validation; features + Ridge baseline with measured metrics in [reports/metrics_baseline.json](reports/metrics_baseline.json)); no primary model, API, or dashboard yet. A CI badge will be added once the GitHub Actions workflow has run on `main`. This README is finalised in Milestone 7.
 
 ## What it will do
 
@@ -12,7 +12,7 @@ Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS 
 - Show predictions and sensor trends in a dashboard that gets every result from the API.
 - Run both services with `docker compose up`.
 
-## Quickstart (current: Milestone 1)
+## Quickstart (current: Milestone 2)
 
 Requires Python 3.13 (`python3`) and network access to NASA's S3 bucket.
 
@@ -22,11 +22,12 @@ pip install -r requirements-dev.txt && pip install -e .
 cp .env.example .env                 # optional; defaults work without it
 python scripts/download_data.py      # downloads ~12 MB, verifies SHA-256, extracts to data/raw/CMAPSSData/
 python -m predmaint.data.validate    # checks the FD001 data contract (docs/04 §6)
+python scripts/train.py --model baseline   # CV + official test metrics; writes models/ and reports/
 ruff check . && ruff format --check .
 pytest -q                            # real-data tests run when data/raw/ is present
 ```
 
-Training, the API, and the dashboard arrive in Milestones 3–5 ([docs/08_IMPLEMENTATION_PLAN.md](docs/08_IMPLEMENTATION_PLAN.md)).
+The primary model, API, and dashboard arrive in Milestones 3–5 ([docs/08_IMPLEMENTATION_PLAN.md](docs/08_IMPLEMENTATION_PLAN.md)).
 
 ## Planned stack
 

@@ -110,8 +110,10 @@ def validate_rul(rul: pd.DataFrame, test: pd.DataFrame) -> None:
         raise DataValidationError(f"RUL: {len(values)} values for {len(units)} test units")
 
 
-def validate_fd001(data: FD001Data, expected: ExpectedFigures = FD001_EXPECTED) -> None:
+def validate_fd001(data: FD001Data, expected: ExpectedFigures | None = FD001_EXPECTED) -> None:
     """Run all contract checks plus the dataset-level figures in ``expected``.
+
+    ``expected=None`` runs only the generic contract checks (used for synthetic data).
 
     Raises:
         DataValidationError: describing the first violated rule.
@@ -119,6 +121,8 @@ def validate_fd001(data: FD001Data, expected: ExpectedFigures = FD001_EXPECTED) 
     validate_trajectories(data.train, "train")
     validate_trajectories(data.test, "test")
     validate_rul(data.rul, data.test)
+    if expected is None:
+        return
     actual = {
         "train_rows": len(data.train),
         "test_rows": len(data.test),

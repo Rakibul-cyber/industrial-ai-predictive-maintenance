@@ -28,7 +28,7 @@ industrial-ai-predictive-maintenance/
 │   ├── models/                    # Training, metrics, artifacts, inference
 │   │   ├── registry.py            #   baseline/primary pipeline factories
 │   │   ├── metrics.py             #   MAE, RMSE, NASA score
-│   │   ├── train.py               #   CV, final fit, test evaluation, selection
+│   │   ├── train.py               #   CV, final fit, test evaluation, report (M2); selection (M3)
 │   │   ├── artifacts.py           #   save/load joblib + metadata JSON
 │   │   └── predict.py             #   load_model, predict_rul, health_band, contract errors
 │   ├── api/                       # HTTP serving layer
@@ -51,8 +51,8 @@ industrial-ai-predictive-maintenance/
 │   ├── test_real_data.py          #   M1 (marker: data)
 │   ├── test_labels.py             #   M2
 │   ├── test_features.py           #   M2
-│   ├── test_metrics.py            #   M3
-│   ├── test_train.py              #   M3
+│   ├── test_metrics.py            #   M2
+│   ├── test_train.py              #   M2 (baseline), M3 (primary + selection)
 │   ├── test_inference_contract.py #   M3
 │   ├── test_api.py                #   M4
 │   ├── test_dashboard_client.py   #   M5
@@ -63,8 +63,12 @@ industrial-ai-predictive-maintenance/
 │   └── processed/                 #   reserved; unused in MVP
 ├── models/                        # artifacts
 │   ├── .gitkeep
-│   ├── model.joblib               #   gitignored
+│   ├── baseline.joblib            #   per-candidate artifact (M2), gitignored
+│   ├── baseline_metadata.json     #   per-candidate metadata, gitignored (reports/ holds the committed record)
+│   ├── model.joblib               #   served (selected) model (M3), gitignored
 │   └── model_metadata.json        #   committed with reported results (M7)
+├── reports/                       # small committed metric reports
+│   └── metrics_baseline.json      #   written by scripts/train.py --model baseline (M2)
 └── docs/                          # 00–15 planning and design documents
 ```
 

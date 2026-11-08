@@ -76,6 +76,21 @@ def synthetic_cmapss_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def synthetic_training_dir(tmp_path: Path) -> Path:
+    """Synthetic FD001-named files large enough for 5-fold CV with a 30-cycle window."""
+    directory = tmp_path / "train_data" / "CMAPSSData"
+    directory.mkdir(parents=True)
+    write_raw_trajectories(
+        make_trajectories([50, 55, 60, 65, 70, 75], seed=11), directory / "train_FD001.txt"
+    )
+    write_raw_trajectories(
+        make_trajectories([35, 40, 45, 50], seed=12), directory / "test_FD001.txt"
+    )
+    write_raw_rul([40, 30, 20, 10], directory / "RUL_FD001.txt")
+    return directory
+
+
+@pytest.fixture
 def real_cmapss_dir() -> Path:
     """The real FD001 directory under ``$DATA_DIR``; skips the test when absent."""
     directory = get_settings().cmapss_dir

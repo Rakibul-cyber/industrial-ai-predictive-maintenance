@@ -40,6 +40,13 @@ If code and docs disagree, stop and raise it via docs/15 — do not pick one sil
 - Config via `predmaint/config.py` + env vars; no hard-coded absolute paths or secrets.
 - Feature computation exists in exactly one place (`features/build.py`), used by training, evaluation, and API.
 
+## Warnings policy
+
+- `DeprecationWarning` is an error in the test suite (`filterwarnings = ["error::DeprecationWarning"]` in `pyproject.toml`).
+- If a warning originates in project code: fix the cause.
+- If it originates inside a third-party library: add a narrowly scoped `filterwarnings` entry (module + message pattern) in `pyproject.toml`, with a comment naming the library, the warning, and why it is out of our control.
+- Never disable warnings globally or per test without that comment.
+
 ## Scope restrictions
 
 FD001 only. No anomaly detection, other subsets, deep learning, hyperparameter search, MLflow, cloud deploy, auth, or drift monitoring unless approved through docs/15.

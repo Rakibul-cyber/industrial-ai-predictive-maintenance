@@ -66,6 +66,37 @@ Readme (Verified): FD001 = 100 train / 100 test trajectories, one condition (sea
 
 **Design consequence:** the shortest test unit has 31 cycles, so `window_size = 30` lets every test unit be evaluated with a full window through the same API contract (ADR-005).
 
+### 5a. Sensor selection on `train_FD001` (Verified 2026-11-08, M2-T1)
+
+Rule (ADR-005): drop a sensor with **≤ 2 unique values** on the training set. Settings are excluded regardless (single operating condition). Measured with pandas 3.1.1:
+
+| Column | Unique | Std | Decision |
+|---|---|---|---|
+| `setting_1` / `setting_2` / `setting_3` | 158 / 13 / 1 | 0.00219 / 0.000293 / 0 | excluded (ADR-005) |
+| `s_1` | 1 | 0 | **dropped** |
+| `s_5` | 1 | 5.33e-15 | **dropped** |
+| `s_6` | 2 | 0.00139 | **dropped** |
+| `s_10` | 1 | 0 | **dropped** |
+| `s_16` | 1 | 3.47e-18 | **dropped** |
+| `s_18` | 1 | 0 | **dropped** |
+| `s_19` | 1 | 0 | **dropped** |
+| `s_2` | 310 | 0.500 | kept |
+| `s_3` | 3012 | 6.13 | kept |
+| `s_4` | 4051 | 9.00 | kept |
+| `s_7` | 513 | 0.885 | kept |
+| `s_8` | 53 | 0.0710 | kept |
+| `s_9` | 6403 | 22.1 | kept |
+| `s_11` | 159 | 0.267 | kept |
+| `s_12` | 427 | 0.738 | kept |
+| `s_13` | 56 | 0.0719 | kept |
+| `s_14` | 6078 | 19.1 | kept |
+| `s_15` | 1918 | 0.0375 | kept |
+| `s_17` | 13 | 1.55 | kept |
+| `s_20` | 120 | 0.181 | kept |
+| `s_21` | 4745 | 0.108 | kept |
+
+Result: **14 kept** (`s_2, s_3, s_4, s_7, s_8, s_9, s_11, s_12, s_13, s_14, s_15, s_17, s_20, s_21`), **7 dropped** (`s_1, s_5, s_6, s_10, s_16, s_18, s_19`) → 43 features. The smallest kept unique count is 13, so the rule has a wide margin. A pure `std == 0` rule would have **kept** `s_5` and `s_16` (float-rounding std), which supports the unique-count rule. The kept list is stored in every saved artifact (pipeline select step + metadata `required_sensors`) and locked by `tests/test_real_data.py`.
+
 ## 6. Data quality checks (implemented in `data/validate.py`, M1)
 
 1. Train/test have exactly 26 columns; RUL has exactly 1.
@@ -117,5 +148,5 @@ Value-range checks: physical ranges are not documented by the source, so no hard
 
 ## 12. Verified vs UNVERIFIED summary
 
-**Verified:** archive URL + size + checksums; nested-zip structure; 14 member files; FD001 shapes, nulls, unit ids, cycle monotonicity, test min length 31, RUL range; whitespace/trailing-space format; readme semantics of RUL; NASA scoring formula text (05 §7); licence status (none stated) and citation request (§11, M1); download script re-verified all checksums end-to-end in M1.
-**UNVERIFIED:** third-party mirror availability (R1); column → physical-sensor-name mapping (ADR-020, not needed); which sensors are near-constant (determined in M2, M2-T1).
+**Verified:** archive URL + size + checksums; nested-zip structure; 14 member files; FD001 shapes, nulls, unit ids, cycle monotonicity, test min length 31, RUL range; whitespace/trailing-space format; readme semantics of RUL; NASA scoring formula text (05 §7); near-constant sensor list (§5a, M2); licence status (none stated) and citation request (§11, M1); download script re-verified all checksums end-to-end in M1.
+**UNVERIFIED:** third-party mirror availability (R1); column → physical-sensor-name mapping (ADR-020, not needed).

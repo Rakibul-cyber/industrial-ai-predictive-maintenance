@@ -6,6 +6,9 @@ data/*
 # model_metadata.json is intentionally NOT ignored: it records the reported metrics.
 models/*.joblib
 models/*.pkl
+# Per-candidate metadata stays local; reports/metrics_<name>.json is the committed record (ADR-023).
+models/*_metadata.json
+!models/model_metadata.json
 
 # --- Python ---
 __pycache__/

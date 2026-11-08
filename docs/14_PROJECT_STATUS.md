@@ -2,19 +2,19 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **M1 — Scaffold, CI, data acquisition & validation: complete, awaiting review** |
+| Current milestone | **M2 — Labels, features, baseline training & evaluation: complete, awaiting review** |
 | Last updated | 2026-11-08 |
-| Git ref | branch `main` @ `71295ba` "docs: Milestone 0 planning baseline (architecture frozen)" (not pushed). M1 work is **uncommitted** in the working tree for review; remote `origin` = `https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git` (public). |
-| Next approved action | **Await user review of M1** and authorization for Milestone 2 (and, separately, any commit/push of M1). |
+| Git ref | `main` = `origin/main` @ `4e8c04c` "feat: Implement initial structure for RUL prediction platform" (M1, committed and pushed by the user), on top of `71295ba` (M0 docs). M2 work is **uncommitted** in the working tree for review. Remote `origin` = `https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git` (public). |
+| Next approved action | **Await user review of M2** and authorization for Milestone 3 (and, separately, any commit/push of M2). |
 
 ## Milestone tracker
 
 | Milestone | Status | Evidence |
 |---|---|---|
 | M0 Planning | **Approved** 2026-11-08 (architecture frozen; ADR-001…021 Accepted, ADR-022 added) | M0 section below |
-| M1 Scaffold, CI, data | **Complete** 2026-11-08 (uncommitted, awaiting review) | M1 section below; CI run pending authorized push |
-| M2 Labels & features | Not started | — |
-| M3 Training & artifacts | Not started | — |
+| M1 Scaffold, CI, data | **Accepted** 2026-11-08; committed `4e8c04c`, pushed; CI green | M1 section + CI section below |
+| M2 Labels, features, baseline (re-scoped, CR-002) | **Complete** 2026-11-08 (uncommitted, awaiting review) | M2 section below |
+| M3 Primary model, selection, inference contract | Not started | — |
 | M4 API | Not started | — |
 | M5 Dashboard | Not started | — |
 | M6 Docker | Not started | — |
@@ -50,9 +50,9 @@
 |---|---|---|---|
 | U1 | Dataset licence — **resolved in M1:** no licence stated on NASA PCoE or data.nasa.gov; PCoE requests acknowledgement + gives a dataset citation (04 §11). No redistribution. | Closed (accepted limitation) | 04 §11, 12 R1 |
 | U2 | Third-party mirror availability — **UNVERIFIED** (only needed if S3 fails) | Open | 12 R1 |
-| U3 | Near-constant sensor list / adequacy of drop rule — **UNVERIFIED** | Open | 08 M2-T1, 12 R12 |
+| U3 | Near-constant sensor list — **resolved in M2**: ≤ 2-unique rule verified on real data (04 §5a) | Closed | 04 §5a, 12 R12 |
 | U4 | NASA score official implementation — **UNVERIFIED** (interpretation fixed by ADR-009) | Open | 12 R5 |
-| U5 | GitHub Actions runner resolves Python 3.13 — **UNVERIFIED**; `.github/workflows/ci.yml` exists but has never run — first run needs a user-authorized push | Open | 08 M1-T7, 12 R11 |
+| U5 | GitHub Actions runner resolves Python 3.13 — **resolved**: run 42491244396 on `4e8c04c` succeeded, `actions/setup-python@v5` step with `python-version: "3.13"` passed. Exact patch version not visible (logs need auth). | Closed | CI section, 12 R11 |
 | U6 | Dockerfile/compose behaviour (not writable in M0) — **UNVERIFIED** | Open | 08 M6, 12 R8 |
 | U7 | amd64 image build — **UNVERIFIED** (wheels confirmed) | Open | 12 R10 |
 | U8 | Column → physical sensor name mapping — **UNVERIFIED**, not used (ADR-020) | Accepted limitation | 12 R2 |
@@ -102,6 +102,44 @@ $ pip check                          → No broken requirements found.
 
 **Not done / pending:** CI has never executed (no push authorized) → U5 stays open.
 
+## CI — first run (2026-11-08)
+
+- Run [42491244396](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/runs/42491244396), workflow `CI`, commit `4e8c04c`, event `push`: **conclusion `success`**. Job `lint-test` on `ubuntu-latest`, 14:44:03Z–14:44:44Z. All steps succeeded: checkout, setup-python (3.13), install dependencies, ruff lint, ruff format check, tests. Queried via the public GitHub REST API (`gh` CLI is not installed; raw logs return 403 without authentication).
+- No `ci:` fix was needed, so no extra commit or push was made.
+- Annotations (non-failing, follow-ups): (1) warning — "Node.js 20 is deprecated … actions/checkout@v4, actions/setup-python@v5 … forced to run on Node.js 24"; (2) notice — `ubuntu-latest` migrates to Ubuntu 26 from 2026-10-19. Bumping action versions needs a verified newer major version and an authorized commit.
+
+## M2 — results (2026-11-08, actual command output, trimmed)
+
+**Scope:** re-scoped by user request (CR-002 / ADR-023): labels, features, Ridge baseline training, CV, official-test evaluation, artifacts, and committed report. Warnings policy added to CLAUDE.md and 09.
+
+**Files created:** `src/predmaint/data/labels.py`, `src/predmaint/features/{__init__,build}.py`, `src/predmaint/models/{__init__,registry,metrics,train,artifacts,predict}.py`, `scripts/train.py`, `reports/metrics_baseline.json`, `tests/{test_labels,test_features,test_metrics,test_train}.py`. Modified: `src/predmaint/data/validate.py` (`expected=None`), `tests/conftest.py`, `tests/test_real_data.py`, `.gitignore`, `README.md`, `CLAUDE.md`, docs 01, 04, 05, 07, 08, 09, 12, 13, 14, 15. Generated, gitignored: `models/baseline.joblib`, `models/baseline_metadata.json`.
+
+```text
+$ ruff check .            → All checks passed!
+$ ruff format --check .   → 44 files already formatted
+$ pytest -q               → 83 passed, 1 skipped (network) in 2.43s
+$ python scripts/train.py --model baseline
+Sensor selection on train (drop if <= 2 unique values): dropped ['s_1', 's_5', 's_6', 's_10', 's_16', 's_18', 's_19']
+Kept 14 sensors: ['s_2', 's_3', 's_4', 's_7', 's_8', 's_9', 's_11', 's_12', 's_13', 's_14', 's_15', 's_17', 's_20', 's_21']
+Features: 43 (cycle + 3 x 14), window_size=30, rul_cap=125
+Training rows: 17731 of 20631 (rows without a full 30-cycle window dropped), 100 units
+  CV MAE  = 15.504 ± 1.052
+  CV RMSE = 19.287 ± 1.181
+Official test set (100 units, last observed cycle, unclipped truth): MAE=15.403 RMSE=19.205 NASA score=595.2
+  (truth clipped at 125: MAE=14.333 RMSE=17.910)
+Saved models/baseline.joblib, models/baseline_metadata.json, reports/metrics_baseline.json
+$ second training run → metrics identical: True
+$ pytest -q --cov=predmaint → 83 passed, 1 skipped; TOTAL 93 %
+```
+
+**Findings:** the test RMSE of 19.2 lies inside the 15–30 sanity band and CV ≈ test, so no leakage signal was found and nothing was tuned. The rolling windows are computed independently per window, so feature rows are bit-identical regardless of surrounding history (tests for truncation and trailing-window-only invariance). The baseline artifact is 5.3 KB, which matters for M6-T4.
+
 ## Measured results
 
-None yet — model metrics, training time, latency, and coverage are recorded here from M3 onwards.
+| Item | Value | Source |
+|---|---|---|
+| Baseline (Ridge) official test MAE / RMSE / NASA | 15.403 / 19.205 / 595.2 | M2 run 2026-11-08T14:50:35Z (05 §7a) |
+| Baseline CV MAE / RMSE (mean ± std) | 15.504 ± 1.052 / 19.287 ± 1.181 | same |
+| Baseline training wall time (`time python scripts/train.py --model baseline`) | 1.4 s total (pipeline 0.2 s) | same |
+| `baseline.joblib` size | 5,297 bytes | `ls -l models/` (input for M6-T4) |
+| Coverage `src/predmaint` | 93 % (514 stmts, 36 missed) | `pytest -q --cov=predmaint` |

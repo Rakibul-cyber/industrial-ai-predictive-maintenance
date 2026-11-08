@@ -25,7 +25,7 @@ Framework: pytest 9.2.0 + pytest-cov 7.1.0; API tests via `fastapi.testclient.Te
 - `data`: auto-skip if `DATA_DIR/raw/CMAPSSData/train_FD001.txt` is absent. Must **run (not skip)** locally for M1, M3, M7 sign-off.
 - `network`: skip unless `RUN_NETWORK_TESTS=1`.
 - `docker`: skip unless `RUN_DOCKER_TESTS=1`.
-- Warnings: `filterwarnings = ["error::DeprecationWarning"]` (all modules) in `pyproject.toml`. The M1 suite is clean under it (48 passed, no warnings). If a future third-party deprecation forces a narrower filter, record why via 15.
+- Warnings policy (also in CLAUDE.md): `DeprecationWarning` is an error (`filterwarnings = ["error::DeprecationWarning"]` in `pyproject.toml`). A warning from project code is fixed at its cause. A warning raised inside a third-party library gets a narrowly scoped `filterwarnings` entry (module + message pattern) with a comment naming the library, the warning, and why it is out of our control. Warnings are never disabled globally or per test without that comment. Status after M2: no filters needed (83 passed, no warnings reported).
 - Download tests use a local stdlib HTTP server (no internet); only the `network` test touches NASA S3. CI does **not** download the dataset (ADR-021).
 
 ## 4. Required passing tests per milestone (cumulative)
@@ -33,8 +33,8 @@ Framework: pytest 9.2.0 + pytest-cov 7.1.0; API tests via `fastapi.testclient.Te
 | Milestone | Must pass before "complete" |
 |---|---|
 | M1 | `test_download` (checksum logic, zip-slip guard, skip-if-valid), `test_load` (26 cols with trailing spaces), `test_validate` (one failing case per rule in 04 §6), `test_real_data` (run locally), `network` test once locally |
-| M2 | + `test_labels`, `test_features` (values, causality, isolation, eligibility, order, selection rule) |
-| M3 | + `test_metrics` (incl. NASA known values), `test_train` (disjoint folds, smoke artifact, metadata keys), `test_inference_contract` (typed errors, clamp, bands, offline == contract) |
+| M2 | + `test_labels` (formula, cap, None), `test_features` (values, row count, columns, per-engine isolation, truncation invariance, trailing-window-only invariance, selection rule), `test_metrics` (MAE/RMSE hand values, NASA known values + asymmetry), `test_train` (disjoint GroupKFold units, baseline end-to-end train → save → reload → predict, metadata fields, reproducibility, checksum gate, artifact errors), `test_real_data` sensor list (run locally) |
+| M3 | + primary-model and ADR-010 selection cases in `test_train`, `test_inference_contract` (typed errors, clamp, bands, offline == contract) |
 | M4 | + `test_api` (200 paths; 422 `VALIDATION_ERROR`/`INSUFFICIENT_CYCLES`/`MISSING_SENSORS`/`NON_CONSECUTIVE_CYCLES`; NaN/Infinity rejected; extra field rejected; 503 `MODEL_UNAVAILABLE` on `/health`, `/predict`, `/model/info`; 404/405 envelopes; 500 `INTERNAL_ERROR` via a monkeypatched failing predictor with no trace in the body; API output == `predict_rul`) |
 | M5 | + `test_dashboard_client` (payload, error parsing, `ApiUnavailableError`, no `predmaint.models` import in `dashboard/`) |
 | M6 | + `test_docker_smoke` with `RUN_DOCKER_TESTS=1` |

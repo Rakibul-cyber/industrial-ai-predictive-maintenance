@@ -1,0 +1,104 @@
+{
+  "model_name": "baseline",
+  "estimator": "ridge",
+  "model_version": "ridge-20261108T145035Z",
+  "trained_at": "2026-11-08T14:50:35Z",
+  "git_sha": "4e8c04cba109b5c4647db4f93917c48556a706ff",
+  "git_dirty": true,
+  "data": {
+    "subset": "FD001",
+    "train_sha256": "963b5e22825b34d8b21c69e1aeb4af3e647050eb672ee8834ba4b5d91d2de0f8",
+    "test_sha256": "3cda7109ce17bafb5443f2ac926cfcf88154b941b8c4cf95eb55d1ddd6f52851",
+    "rul_sha256": "a19c8ec94931949d0485bdc35118206e9c81c4547b422efb9cf86f4ceddbceca"
+  },
+  "config": {
+    "rul_cap": 125,
+    "window_size": 30,
+    "random_seed": 42,
+    "cv_folds": 5
+  },
+  "required_sensors": [
+    "s_2",
+    "s_3",
+    "s_4",
+    "s_7",
+    "s_8",
+    "s_9",
+    "s_11",
+    "s_12",
+    "s_13",
+    "s_14",
+    "s_15",
+    "s_17",
+    "s_20",
+    "s_21"
+  ],
+  "dropped_columns": [
+    "setting_1",
+    "setting_2",
+    "setting_3",
+    "s_1",
+    "s_5",
+    "s_6",
+    "s_10",
+    "s_16",
+    "s_18",
+    "s_19"
+  ],
+  "metrics": {
+    "cv": {
+      "mae_mean": 15.503572964669207,
+      "mae_std": 1.0522406522745065,
+      "rmse_mean": 19.286861677553414,
+      "rmse_std": 1.1805654932325933,
+      "folds": [
+        {
+          "fold": 1,
+          "n_val_units": 20,
+          "n_val_rows": 3540,
+          "mae": 17.093569277733582,
+          "rmse": 20.933394052644203
+        },
+        {
+          "fold": 2,
+          "n_val_units": 20,
+          "n_val_rows": 3553,
+          "mae": 15.519859141606952,
+          "rmse": 19.183384743524478
+        },
+        {
+          "fold": 3,
+          "n_val_units": 20,
+          "n_val_rows": 3546,
+          "mae": 15.55497011410895,
+          "rmse": 19.474101372496474
+        },
+        {
+          "fold": 4,
+          "n_val_units": 20,
+          "n_val_rows": 3545,
+          "mae": 14.162924838256126,
+          "rmse": 17.608958345208304
+        },
+        {
+          "fold": 5,
+          "n_val_units": 20,
+          "n_val_rows": 3547,
+          "mae": 15.186541451640414,
+          "rmse": 19.23446987389362
+        }
+      ]
+    },
+    "test": {
+      "mae": 15.402792561432605,
+      "rmse": 19.20490906453335,
+      "nasa_score": 595.1505275897849
+    },
+    "test_clipped_truth": {
+      "mae": 14.332792561432605,
+      "rmse": 17.910432407867706
+    },
+    "n_train_rows": 17731,
+    "n_test_units": 100
+  }
+}
