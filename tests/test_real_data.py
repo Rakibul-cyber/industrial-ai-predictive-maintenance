@@ -75,7 +75,8 @@ def test_api_reproduces_committed_example(example: str) -> None:
     clear_model_cache()
     with TestClient(create_app(model_path=model_path)) as client:
         body = client.post("/predict", json=payload).json()
-    for key in ("unit_id", "cycles_received", "last_cycle", "predicted_rul", "health_status"):
+    keys = ("unit_id", "cycles_received", "last_cycle", "predicted_rul", "health_status")
+    for key in (*keys, "rul_lower", "rul_upper", "interval_level"):
         assert body[key] == expected[key], key
 
 
@@ -96,3 +97,32 @@ def test_dashboard_true_rul_matches_training_labels(real_cmapss_dir: Path, unit:
     assert series["true_rul_capped"].tolist() == [int(labels[c]) for c in cycles]
     assert series["true_rul_capped"].iloc[-1] == 0
     assert series["true_rul_capped"].iloc[0] == min(RUL_CAP, history.last_cycle - WINDOW_SIZE)
+
+
+def test_committed_intervals_reproduce_recorded_test_coverage(real_cmapss_dir: Path) -> None:
+    """Recompute the official-test interval evaluation from the committed artifacts."""
+    import numpy as np
+
+    from predmaint.features.build import build_features, last_rows
+    from predmaint.models.intervals import summarize_intervals
+    from predmaint.models.predict import (
+        interval_path_for,
+        load_interval_model,
+        order_bounds,
+        predict_from_features,
+    )
+
+    model_path = get_settings().model_path
+    if not interval_path_for(model_path).is_file():
+        pytest.skip("no interval artifact (run scripts/train.py --model intervals)")
+    clear_model_cache()
+    model, intervals = load_model(model_path), load_interval_model(interval_path_for(model_path))
+    data = load_fd001(real_cmapss_dir)
+    last = last_rows(build_features(data.test, model.required_sensors, model.window_size))
+    point = predict_from_features(model.pipeline, last, model.rul_cap)
+    lo, hi, n = order_bounds(
+        point, intervals.lower.predict(last), intervals.upper.predict(last), 125
+    )
+    summary = summarize_intervals(data.rul["rul"].to_numpy(dtype=float), lo, hi, 125, n)
+    assert summary == intervals.metadata["evaluation"]["test"]
+    assert np.all(lo <= point) and np.all(point <= hi)

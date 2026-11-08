@@ -1,6 +1,6 @@
 # 16 — Evaluation Report
 
-All numbers in this report are read from the committed files [`reports/metrics_baseline.json`](../reports/metrics_baseline.json), [`reports/metrics_primary.json`](../reports/metrics_primary.json), [`reports/model_comparison.json`](../reports/model_comparison.json), [`reports/residuals_by_rul_bucket.json`](../reports/residuals_by_rul_bucket.json) and [`models/model_metadata.json`](../models/model_metadata.json); the document was generated from them in Milestone 7. The served model is `primary-20261108-f4c86df`.
+All numbers in this report are read from the committed files [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) (§9), [`reports/metrics_baseline.json`](../reports/metrics_baseline.json), [`reports/metrics_primary.json`](../reports/metrics_primary.json), [`reports/model_comparison.json`](../reports/model_comparison.json), [`reports/residuals_by_rul_bucket.json`](../reports/residuals_by_rul_bucket.json) and [`models/model_metadata.json`](../models/model_metadata.json); the document was generated from them in Milestone 7. The served model is `primary-20261108-f4c86df`.
 
 ## 1. Dataset and protocol
 
@@ -82,7 +82,7 @@ Reading the table:
 - **Cap saturation:** predictions are bounded at 125, so early-life engines are under-predicted (§6, > 125 bucket); the demo engine 1 (true RUL 112) predicts exactly 125.
 - **Train-set optimism:** dashboard views of *training* engines (e.g. train engine 1) are in-sample and look better than out-of-sample performance; only the official test set and CV are honest estimates.
 - **Optimistic bias at 21–60 cycles** (§6).
-- **No uncertainty estimate:** point predictions only; health bands are illustrative thresholds.
+- **Uncertainty:** since M8 a nominal 80 % quantile interval is served (§9). It is below nominal coverage out-of-fold and cannot cover true RUL > 125; health bands are illustrative thresholds.
 - **Selection bias:** small (best of 12 configurations on CV; test-set agreement suggests it is minor).
 - **Pickle tied to the scikit-learn pin:** `model.joblib` requires scikit-learn 1.9.1; a test fails on a version mismatch and retraining reproduces the artifact byte-identically.
 
@@ -95,7 +95,47 @@ None of the following is part of the MVP. Each would need its own change record 
 | FD002–FD004 (multiple conditions / fault modes) | Operating-condition normalisation (per-regime sensor scaling), regime-aware features, re-validated data contract and checksums, larger evaluation |
 | Anomaly detection | A separate unsupervised model (e.g. reconstruction error on healthy early cycles), its own threshold calibration, evaluation protocol and API endpoint |
 | Sequence models (LSTM/CNN/Transformer) | A deep-learning dependency (ADR), GPU-optional training, sequence windows in the shared feature path, longer training |
-| Prediction intervals | Quantile gradient boosting or conformal prediction on CV residuals; API field for the interval |
+| ~~Prediction intervals~~ — **IMPLEMENTED in M8** (§9, ADR-034) | Remaining: calibration toward nominal coverage (e.g. conformal adjustment on out-of-fold residuals) |
 | Bias correction for the 21–60 range | Residual analysis on CV folds, asymmetric loss or post-hoc calibration, then re-selection |
 | Drift monitoring / retraining | Logging of inputs, distribution checks against `training_ranges`, a retraining trigger and model registry |
 | Cloud deployment | Container registry, managed runtime, auth/TLS, secrets management, cost controls |
+
+## 9. Prediction intervals (Milestone 8, ADR-034)
+
+Source: [`reports/metrics_intervals.json`](../reports/metrics_intervals.json) and `models/model_intervals_metadata.json`, trained 2026-11-08T18:55:47Z for served model `primary-20261108-f4c86df` (code: commit `8d893ff` plus the uncommitted M8 working tree, `git_dirty: true`).
+
+**Method.** Two `HistGradientBoostingRegressor(loss="quantile")` models at q = 0.1 and q = 0.9 give a nominal **80%** interval. They use the served model's features, train-row filter, seed (42) and hyperparameters `{'learning_rate': 0.05, 'max_iter': 200, 'max_leaf_nodes': 15, 'l2_regularization': 0.0}`; there is no search, and the point model is not retrained. Post-processing: clamp to [0, rul_cap]; lower=min(lower, point); upper=max(upper, point). Coverage counts a true RUL inside [lower, upper], inclusive. Training cost: CV 14.3 s (3 models × 5 folds), final fit 1.8 s (2 models).
+
+### 9a. Out-of-fold (5-fold GroupKFold by engine, every eligible training row)
+
+| Scope | n | Coverage (unclipped truth) | Coverage (clipped truth) | Mean width | Median width |
+|---|---|---|---|---|---|
+| **All** | 17,731 | **0.509** | **0.737** | 37.2 | 36.7 |
+| true RUL 0-20 | 2,100 | 0.768 | 0.768 | 32.1 | 29.7 |
+| true RUL 21-60 | 4,000 | 0.627 | 0.627 | 43.9 | 43.9 |
+| true RUL 61-125 | 6,392 | 0.767 | 0.767 | 43.6 | 45.5 |
+| true RUL >125 | 5,239 | 0.000 | 0.773 | 26.2 | 21.9 |
+
+Reordered (bound moved to the point, incl. quantile crossing): **1,023** of 17,731 (5.8%).
+
+### 9b. Official test set (last observed cycle, 100 engines)
+
+| Scope | n | Coverage (unclipped truth) | Coverage (clipped truth) | Mean width | Median width |
+|---|---|---|---|---|---|
+| **All** | 100 | **0.740** | **0.820** | 42.1 | 42.0 |
+| true RUL 0-20 | 16 | 0.938 | 0.938 | 27.7 | 20.4 |
+| true RUL 21-60 | 23 | 0.826 | 0.826 | 49.4 | 43.9 |
+| true RUL 61-125 | 50 | 0.800 | 0.800 | 44.4 | 49.9 |
+| true RUL >125 | 11 | 0.000 | 0.727 | 37.9 | 39.7 |
+
+Reordered: **8** of 100.
+
+### 9c. Reading the results — nothing was tuned toward 80 %
+
+- **The cap makes > 125 uncoverable against unclipped truth.** Both bounds are capped at 125 because the models learn capped labels. Coverage is therefore 0.000 (CV) and 0.000 (test) for engines with true RUL > 125, by construction. Against clipped truth, the target the model actually learns, the same bucket reaches 0.773 / 0.727. This is expected; it is reported, not fixed.
+- **Overall unclipped CV coverage (0.509) is dominated by that effect:** 5,239 of 17,731 training rows (30%) have true RUL > 125. Excluding the cap effect (clipped truth), CV coverage is 0.737, below the nominal 0.80.
+- **Per bucket, out-of-fold coverage is below nominal everywhere** (0–20: 0.768, 21–60: 0.627, 61–125: 0.767). The 21–60 range — where the point model is also optimistically biased (§6) — is the least covered. Quantile models fitted on all training data are mildly over-confident on unseen engines.
+- **On the official test set** coverage is 0.740 (unclipped) / 0.820 (clipped); per bucket 0.938 / 0.826 / 0.800 / 0.000. With 11–50 engines per bucket these estimates are noisy (one engine = 2–9 percentage points); the CV numbers over 17,731 rows are the more reliable estimate.
+- **Width:** mean 37.2 cycles (CV) / 42.1 (test). Near failure the interval is narrowest (test 0–20: mean 27.7), where it matters most.
+- **Demo engines:** late-life test engine 34 predicts 6.3 in [4.84, 18.76] (true 7, covered). Early-life test engine 1 predicts 125.0 in [118.45, 125.0] (true 112, **not** covered): the cap effect on a single engine.
+- Honest use: treat the interval as an approximate ~74 % (CV, clipped truth) band for engines not beyond the cap, not as a calibrated 80 % guarantee. Calibration (e.g. conformal adjustment on out-of-fold residuals) is a candidate next step, NOT IMPLEMENTED.

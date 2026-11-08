@@ -1,6 +1,6 @@
 # 08 — Implementation Plan
 
-**All milestones M0–M7 are COMPLETE (MVP, 2026-11-08).** Milestone 0 (planning) was approved with the architecture freeze on 2026-11-08. Milestones run strictly in order; each starts only after explicit user authorization (CLAUDE.md).
+**All milestones M0–M7 are COMPLETE (MVP, 2026-11-08); post-MVP Milestone 8 (prediction intervals) is COMPLETE.** Milestone 0 (planning) was approved with the architecture freeze on 2026-11-08. Milestones run strictly in order; each starts only after explicit user authorization (CLAUDE.md).
 
 **Critical path:** M1 → M2 → M3 → M4 → M5 → M6 → M7 (fully sequential: features need data, training needs features, API needs the artifact, dashboard needs the API, compose needs both services, final docs need everything). Total estimate ≈ 22 h.
 
@@ -231,6 +231,35 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 - **Acceptance criteria:** every item in [11](11_ACCEPTANCE_CRITERIA.md) ticked with evidence or explicitly marked Not met with a reason.
 - **Estimated effort:** 2 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting the user's final commit).
 
+## M8 — Prediction intervals (post-MVP extension, CR-008 / ADR-034)
+
+- **Objective:** a nominal 80 % prediction interval served next to every point prediction, evaluated honestly (coverage and width, overall and by RUL bucket), without changing the point model.
+- **Dependencies:** M7 (MVP complete, CR-007 committed).
+- **Requirements:** FR-018.
+- **Files to create:** `src/predmaint/models/intervals.py`, `models/model_intervals.joblib`, `models/model_intervals_metadata.json`, `reports/metrics_intervals.json`, `tests/test_intervals.py`.
+- **Files to modify:** `src/predmaint/__init__.py` (0.2.0), `models/predict.py`, `models/train.py` (CLI), `models/registry.py`, `api/{schemas,service,main}.py`, `dashboard/{helpers,app}.py`, `scripts/make_request_payload.py`, `scripts/smoke_test.sh`, `Dockerfile`, `.gitignore`, `examples/expected_predictions.json`, tests (`conftest`, `test_api`, `test_inference_contract`, `test_dashboard_*`, `test_model_artifact`, `test_real_data`), README, CLAUDE.md, docs 00, 01, 05, 06, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17.
+- **Tasks:**
+  - [x] M8-T1 Change control: CR-008, ADR-034, FR-018, doc 00 scope, M8 plan.
+  - [x] M8-T2 `registry.make_quantile_model`; `models/intervals.py` (`run_interval_training`, `summarize_intervals`); `scripts/train.py --model intervals` (refuses without the served model or with a served baseline).
+  - [x] M8-T3 Inference: `IntervalModel`, `order_bounds`, `interval_mismatch`, `load_interval_model`; `predict_rul(..., intervals)`; point prediction byte-identical.
+  - [x] M8-T4 API 0.2.0: `rul_lower`/`rul_upper`/`interval_level`, `/health.intervals_loaded`, `/model/info.intervals`; warning + null fields when absent or mismatched.
+  - [x] M8-T5 Dashboard: interval caption, shaded trajectory band (Vega-Lite area), model-info intervals table; graceful nulls.
+  - [x] M8-T6 Artifacts trained and committed-ready; sidecar regenerated (point values unchanged); Dockerfile copies them; smoke test asserts `intervals_loaded` and `lower ≤ point ≤ upper`.
+  - [x] M8-T7 Tests (intervals, API, dashboard, artifact, real data); CR-009 smoke-test port fix.
+- **Verification commands:**
+
+  ```bash
+  ruff check . && ruff format --check .
+  pytest -q
+  python scripts/train.py --model intervals
+  python -m predmaint.api.main &   # curl /health and /predict (late + engine 1); stop
+  bash scripts/smoke_test.sh; echo $?
+  ls -l models/*.joblib
+  ```
+
+- **Acceptance criteria:** FR-018 met with evidence; point model and its artifact byte-identical; all tests pass with the 85 % gate; smoke test passes with the interval assertions.
+- **Estimated effort:** 4 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting review). Evidence in 14.
+
 ## Requirement → milestone traceability
 
 | Milestone | Requirements |
@@ -242,3 +271,4 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
 | M5 | FR-014, FR-015, FR-016 |
 | M6 | FR-017 |
 | M7 | NFR-005, NFR-009 |
+| M8 | FR-018 |

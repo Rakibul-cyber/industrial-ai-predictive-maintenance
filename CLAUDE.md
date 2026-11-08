@@ -66,12 +66,12 @@ FD001 only. No anomaly detection, other subsets, deep learning, hyperparameter s
 
 ## Project state: MVP COMPLETE (2026-11-08)
 
-All milestones M0–M7 are complete (docs/08, docs/14). The MVP is frozen: **any further work, including fixes, goes through change control (docs/15)** and needs explicit user authorization as a new milestone.
+All milestones M0–M7 are complete (docs/08, docs/14); post-MVP Milestone 8 (prediction intervals, CR-008 / ADR-034) is complete. The MVP is frozen: **any further work, including fixes, goes through change control (docs/15)** and needs explicit user authorization as a new milestone.
 
 Candidate next milestones (**NOT IMPLEMENTED, NOT authorized**; details in docs/16 §8):
 
 - FD002–FD004 support (per-regime normalisation, regime-aware features)
-- Prediction intervals (quantile boosting or conformal prediction)
+- Interval calibration toward nominal coverage (e.g. conformal adjustment; M8 intervals under-cover, docs/16 §9)
 - Bias correction for the 21–60-cycle range (optimistic predictions)
 - Anomaly detection model and endpoint
 - Sequence models (LSTM/CNN/Transformer) under the same CV protocol

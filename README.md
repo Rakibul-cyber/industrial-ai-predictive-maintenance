@@ -1,6 +1,6 @@
 # Industrial AI — Predictive Maintenance Platform
 
-End-to-end remaining-useful-life (RUL) prediction for turbofan engines on NASA's C-MAPSS **FD001** benchmark: reproducible data acquisition, leakage-safe features, engine-grouped cross-validation, two models with a pre-registered selection rule, a FastAPI service, a Streamlit dashboard, Docker Compose and CI. On the official test set (100 engines, unclipped truth) the served **HistGradientBoosting** model reaches **RMSE 16.61 / MAE 12.57 cycles**, against **RMSE 19.14 / MAE 15.35** for the Ridge baseline. It was selected on 5-fold CV RMSE (16.56 vs 19.15), not on the test set.
+End-to-end remaining-useful-life (RUL) prediction for turbofan engines on NASA's C-MAPSS **FD001** benchmark: reproducible data acquisition, leakage-safe features, engine-grouped cross-validation, two models with a pre-registered selection rule, a FastAPI service, a Streamlit dashboard, Docker Compose and CI. On the official test set (100 engines, unclipped truth) the served **HistGradientBoosting** model reaches **RMSE 16.61 / MAE 12.57 cycles**, against **RMSE 19.14 / MAE 15.35** for the Ridge baseline. It was selected on 5-fold CV RMSE (16.56 vs 19.15), not on the test set. Since Milestone 8 each prediction also carries a nominal 80 % quantile-regression interval, with its coverage reported honestly (below nominal; see Results).
 
 [![CI](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml/badge.svg)](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml)
 
@@ -52,6 +52,7 @@ streamlit run src/predmaint/dashboard/app.py --server.address localhost --server
 python scripts/train.py --model baseline   # Ridge: CV + official test metrics → models/, reports/
 python scripts/train.py --model primary    # HistGradientBoosting: 12-config CV search (~80 s on 8 cores)
 python scripts/train.py --select           # promote the lower-CV-RMSE model → models/model.joblib, model_metadata.json
+python scripts/train.py --model intervals  # q0.1/q0.9 interval models for the served model → models/model_intervals.*
 # the served model_version embeds the git SHA, so refresh the recorded demo expectations:
 python scripts/make_request_payload.py --unit 1 --out examples/predict_request.json --expected examples/expected_predictions.json
 python scripts/make_request_payload.py --unit 1 --last 30 --out examples/predict_request_min.json --expected examples/expected_predictions.json
@@ -91,10 +92,10 @@ curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @e
 ```
 
 ```json
-{"unit_id":"test-unit-34","predicted_rul":6.3,"health_status":"critical","cycles_received":203,"cycles_used":30,"last_cycle":203,"model_version":"primary-20261108-f4c86df","warnings":[]}
+{"unit_id":"test-unit-34","predicted_rul":6.3,"health_status":"critical","cycles_received":203,"cycles_used":30,"last_cycle":203,"model_version":"primary-20261108-f4c86df","warnings":[],"rul_lower":4.84,"rul_upper":18.76,"interval_level":0.8}
 ```
 
-`GET /health` reports liveness and `model_loaded`; `GET /model/info` reports the served model, selection rule and metrics. Every error uses one envelope `{"error": {"code", "message", "details"}}`. Contract: [docs/06_API_SPECIFICATION.md](docs/06_API_SPECIFICATION.md).
+The interval fields are `null` if the interval artifact is missing or doesn't match the served model. `GET /health` reports liveness, `model_loaded` and `intervals_loaded`; `GET /model/info` reports the served model, selection rule and metrics. Every error uses one envelope `{"error": {"code", "message", "details"}}`. Contract: [docs/06_API_SPECIFICATION.md](docs/06_API_SPECIFICATION.md).
 
 ## Results
 
@@ -102,6 +103,15 @@ curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @e
 |---|---|---|---|---|
 | Ridge baseline | 19.15 ± 1.18 | 19.14 | 15.35 | 590.6 |
 | **HistGradientBoosting (served)** | **16.56 ± 0.70** | **16.61** | **12.57** | **441.5** |
+
+**Prediction intervals (nominal 80 %, quantile HGB, Milestone 8):**
+
+| Evaluation | Coverage, unclipped truth | Coverage, truth clipped at 125 | Mean width (cycles) |
+|---|---|---|---|
+| 5-fold GroupKFold out-of-fold (17,731 rows) | 0.509 | 0.737 | 37.2 |
+| Official test set (100 engines) | 0.740 | 0.820 | 42.1 |
+
+Coverage is below nominal, and against unclipped truth it is 0 for engines with true RUL > 125 because the bounds cannot exceed the cap. It is reported, not tuned (evaluation report §9).
 
 Test = official FD001 test set, last observed cycle of each of 100 engines, unclipped truth; RUL capped at 125 for training and predictions. CV and test rankings agree (`rankings_agree: true`). Full protocol, search grid, residuals by RUL range and limitations: **[docs/16_EVALUATION_REPORT.md](docs/16_EVALUATION_REPORT.md)**.
 
@@ -112,7 +122,7 @@ src/predmaint/       data/ (download, load, validate, labels) · features/ · mo
                      metrics, artifacts, selection, predict) · api/ (FastAPI) · dashboard/ (Streamlit)
 scripts/             download_data.py · train.py · make_request_payload.py · smoke_test.sh
 tests/               unit, contract, API, dashboard (AppTest), real-data, Docker smoke
-models/              model.joblib + model_metadata.json (served model, committed)
+models/              model.joblib + model_metadata.json (served model) and model_intervals.* (80 % intervals), committed
 reports/             metrics per model, model comparison, residuals by RUL bucket
 examples/            demo requests (FD001 test engines 1 and 34) + expected predictions
 docs/                00–17: charter, requirements, architecture, …, decision log, evaluation report
@@ -123,10 +133,10 @@ Full tree with one line per file: [docs/07_REPOSITORY_STRUCTURE.md](docs/07_REPO
 
 ## Testing and CI
 
-- **pytest:** 187 tests pass locally (2 opt-in tests skipped). Line coverage 94.98 %, enforced at **85 %** in `pyproject.toml`.
+- **pytest:** 208 tests pass locally (2 opt-in tests skipped). Line coverage 95.42 %, enforced at **85 %** in `pyproject.toml`.
 - **Markers:** `data` (runs when FD001 is present), `network` (`RUN_NETWORK_TESTS=1`), `docker` (`RUN_DOCKER_TESTS=1`).
 - **Kinds of test:** leakage tests (disjoint engine folds, causal features), an inference contract test (API output == offline prediction), the committed-artifact check (scikit-learn version pin, recorded predictions), and real-data tests that recompute the served model's test RMSE.
-- **CI** (GitHub Actions, `ubuntu-24.04`): `lint-test` (ruff + pytest with the coverage gate) and `docker` (`scripts/smoke_test.sh`: build, compose up, both healthchecks, a `/predict` on the late-life example, teardown).
+- **CI** (GitHub Actions, `ubuntu-24.04`): `lint-test` (ruff + pytest with the coverage gate) and `docker` (`scripts/smoke_test.sh`: build, compose up, both healthchecks, a `/predict` on the late-life example incl. `rul_lower ≤ predicted_rul ≤ rul_upper`, teardown).
 - Strategy: [docs/09_TESTING_STRATEGY.md](docs/09_TESTING_STRATEGY.md).
 
 ## Engineering decisions worth noticing
@@ -135,18 +145,19 @@ Full tree with one line per file: [docs/07_REPOSITORY_STRUCTURE.md](docs/07_REPO
 - **Select on CV, report on test.** The served model is chosen by CV RMSE; the official test set stays a held-out report. [ADR-024](docs/13_DECISION_LOG.md#adr-024--served-model-selected-by-cv-rmse-supersedes-adr-010)
 - **One feature path for training and serving.** `features.build` computes every window independently, so the API's 30-cycle request yields bit-identical features; a contract test enforces API == offline. [ADR-005](docs/13_DECISION_LOG.md#adr-005--feature-strategy)
 - **Degraded-mode API.** Without a loadable model the service still starts. `/health` says `model_loaded: false`, `/predict` returns 503 in the standard envelope, and the container healthcheck reads readiness rather than the status code. [ADR-022](docs/13_DECISION_LOG.md#adr-022--503-without-artifact-demo-reproducibility-path), [ADR-028](docs/13_DECISION_LOG.md#adr-028--health-always-200-readiness-via-model_loaded-amends-adr-022)
+- **Uncertainty without touching the point model.** Two quantile models reuse the served model's pipeline and hyperparameters. The API falls back to null bounds when the interval artifact doesn't match the served model, and coverage is reported by RUL bucket, including where it fails. [ADR-034](docs/13_DECISION_LOG.md#adr-034--prediction-intervals-via-quantile-gradient-boosting-milestone-8)
 - **Committed artifact with version checks.** The 451 KB model ships in git and in the image; scikit-learn is pinned, `/model/info` reports a version match, a test fails on drift, and retraining reproduces it byte-for-byte. [ADR-030](docs/13_DECISION_LOG.md#adr-030--commit-the-served-model-artifact-decides-m6-t4)
 
-All 32 decisions: [docs/13_DECISION_LOG.md](docs/13_DECISION_LOG.md).
+All 34 decisions: [docs/13_DECISION_LOG.md](docs/13_DECISION_LOG.md).
 
 ## Limitations and future work
 
 - FD001 only (one operating condition, one fault mode; simulated data).
 - Predictions are capped at 125 cycles: engines with longer true RUL are under-predicted, and early-life engines (e.g. test engine 1, true RUL 112) show the cap.
 - On the test set, predictions for engines with 21–60 cycles left are on average ~5 cycles **late** (optimistic).
-- Point predictions only, no uncertainty; health bands are illustrative.
+- The 80 % prediction intervals under-cover (out-of-fold 0.737 against capped truth) and cannot cover true RUL > 125; treat them as approximate. Health bands are illustrative.
 - The pickled model is tied to the scikit-learn pin.
-- Candidate next steps, **not implemented**: FD002–FD004 with condition normalisation, prediction intervals, bias correction, anomaly detection, drift monitoring. See [docs/16_EVALUATION_REPORT.md §8](docs/16_EVALUATION_REPORT.md).
+- Candidate next steps, **not implemented**: FD002–FD004 with condition normalisation, interval calibration (e.g. conformal), bias correction, anomaly detection, drift monitoring. See [docs/16_EVALUATION_REPORT.md §8](docs/16_EVALUATION_REPORT.md).
 
 ## Dataset citation and acknowledgment
 

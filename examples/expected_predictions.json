@@ -6,6 +6,9 @@
     "predicted_rul": 125.0,
     "health_status": "healthy",
     "model_version": "primary-20261108-f4c86df",
+    "rul_lower": 118.45,
+    "rul_upper": 125.0,
+    "interval_level": 0.8,
     "true_rul_at_last_cycle": 112
   },
   "predict_request_min.json": {
@@ -15,6 +18,9 @@
     "predicted_rul": 125.0,
     "health_status": "healthy",
     "model_version": "primary-20261108-f4c86df",
+    "rul_lower": 118.45,
+    "rul_upper": 125.0,
+    "interval_level": 0.8,
     "true_rul_at_last_cycle": 112
   },
   "predict_request_late.json": {
@@ -24,6 +30,9 @@
     "predicted_rul": 6.3,
     "health_status": "critical",
     "model_version": "primary-20261108-f4c86df",
+    "rul_lower": 4.84,
+    "rul_upper": 18.76,
+    "interval_level": 0.8,
     "true_rul_at_last_cycle": 7
   }
 }

@@ -113,6 +113,7 @@ def create_app(model_path: Path | None = None) -> FastAPI:
             model_loaded=model is not None,
             model_version=model.model_version if model else None,
             api_version=__version__,
+            intervals_loaded=service.intervals is not None,
         )
 
     @app.post("/predict", response_model=PredictResponse, responses=_ERRORS, tags=["prediction"])

@@ -9,7 +9,7 @@ Style: **modular monolith** — one Python package `predmaint` (under `src/`), C
 | Config | `predmaint/config.py` | Single source of defaults (`rul_cap`, `window_size`, seeds, band thresholds, paths) and env-var overrides. | Hold secrets. |
 | Data | `predmaint/data/` | Download + checksum (`download.py`), parse raw files (`load.py`), validate data contract (`validate.py`), compute labels (`labels.py`). | Engineer features. |
 | Features | `predmaint/features/build.py` | Sensor selection, causal rolling features, "last row per unit" extraction. **Single code path used by training, evaluation and the API.** | Fit models. |
-| Models | `predmaint/models/` | Model definitions + 12-config search grid (`registry.py`), CV + training + evaluation (`train.py`), metrics (`metrics.py`), artifact save/load + metadata (`artifacts.py`), ADR-024 selection and promotion (`selection.py`), inference contract (`predict.py`). | Know about HTTP. |
+| Models | `predmaint/models/` | Model definitions + 12-config search grid (`registry.py`), CV + training + evaluation (`train.py`), metrics (`metrics.py`), artifact save/load + metadata (`artifacts.py`), ADR-024 selection and promotion (`selection.py`), prediction-interval training/evaluation (`intervals.py`, M8), inference contract incl. interval bounds (`predict.py`). | Know about HTTP. |
 | API | `predmaint/api/` | FastAPI app (`main.py`), Pydantic schemas (`schemas.py`), model-holder service (`service.py`), error envelope (`errors.py`). | Train models or read raw data files. |
 | Dashboard | `predmaint/dashboard/` | Streamlit UI (`app.py`), a thin HTTP client returning typed results (`api_client.py`), and display helpers (`helpers.py`: true RUL, request bodies, trajectory sampling). | Import model, feature, inference or API-server code, or compute predictions. |
 | CLI scripts | `scripts/` | Thin entrypoints (`download_data.py`, `train.py`, `make_request_payload.py`) that call package functions, plus the Docker smoke test `smoke_test.sh`. | Contain logic. |
@@ -59,7 +59,7 @@ flowchart LR
 1. Pydantic validates the request shape and types (422 on failure).
 2. `ModelService` only converts the records and calls `models.predict.predict_rul`, which checks, in order: ≥ `window_size` records, required columns non-null, finite values / integer cycles, consecutive cycles (422 with specific codes; 06 §6).
 3. Only the last `window_size` records → `features.build` (same function as training) → one feature row.
-4. Pipeline predict → clamp to [0, RUL_CAP] (ADR-027) → health status (ADR-025) → out-of-range warnings.
+4. Pipeline predict → clamp to [0, RUL_CAP] (ADR-027) → health status (ADR-025) → out-of-range warnings → if a matching interval artifact is loaded, q0.1/q0.9 predictions on the same feature row, clamped and ordered around the point (ADR-034); otherwise null bounds.
 5. Response with `model_version` from metadata.
 
 The exact contract is in [06](06_API_SPECIFICATION.md); the function-level contract in [05](05_ML_DESIGN.md) §10.

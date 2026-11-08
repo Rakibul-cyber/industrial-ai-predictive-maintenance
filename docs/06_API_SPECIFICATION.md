@@ -2,7 +2,7 @@
 
 FastAPI app built by `predmaint.api.main:create_app()` (module-level `app` for uvicorn). Run it with `python -m predmaint.api.main`, which binds `$API_HOST:$API_PORT` (default `127.0.0.1:8000`), or with `uvicorn predmaint.api.main:app --host … --port …`. The served model is loaded once at startup from `$MODEL_PATH` (default `$MODEL_DIR/model.joblib`; env vars in [10](10_DEPLOYMENT_PLAN.md) §3). JSON only. No authentication, CORS or rate limiting (local MVP; ADR-012). Interactive docs at `/docs` (title, version from the package, description, and a real example request when the server runs from the repo root).
 
-All bodies below were copied from `curl` / TestClient output against the served model `primary-20261108-f4c86df` on 2026-11-08 (Milestone 4).
+All bodies below were copied from `curl` / TestClient output against the served model `primary-20261108-f4c86df` on 2026-11-08 (Milestone 4; interval fields and `api_version` 0.2.0 from Milestone 8).
 
 ## 1. Endpoints
 
@@ -12,6 +12,8 @@ All bodies below were copied from `curl` / TestClient output against the served 
 | POST | `/predict` | RUL prediction for one engine | 200 | 422 (4 codes), 503, 500 |
 | GET | `/model/info` | Served model metadata and metrics | 200 | 503 `MODEL_UNAVAILABLE` |
 
+**Interval artifact (ADR-034):** loaded at startup from `model_intervals.joblib` next to `MODEL_PATH`. If it is absent, unloadable or built for a different `model_version`, the API logs a WARNING and serves point predictions with `rul_lower`/`rul_upper`/`interval_level` = `null`; nothing else changes.
+
 **No-artifact rule (ADR-022 as amended by ADR-028):** if the model cannot be loaded at startup, the API still starts and logs a WARNING. `/health` returns **200** with `"model_loaded": false`; `/predict` and `/model/info` return **503** `MODEL_UNAVAILABLE` in the standard error body (§6).
 
 ## 2. `GET /health`
@@ -19,13 +21,13 @@ All bodies below were copied from `curl` / TestClient output against the served 
 With a model (200):
 
 ```json
-{"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.1.0"}
+{"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.2.0","intervals_loaded":true}
 ```
 
 Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 
 ```json
-{"status":"degraded","model_loaded":false,"model_version":null,"api_version":"0.1.0"}
+{"status":"degraded","model_loaded":false,"model_version":null,"api_version":"0.2.0","intervals_loaded":false}
 ```
 
 | Field | Type | Rule |
@@ -33,7 +35,8 @@ Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 | `status` | `"ok" \| "degraded"` | `degraded` when no model is loaded. |
 | `model_loaded` | bool | Whether `/predict` can serve. Readiness probes (M6 compose healthcheck) must check this field, not only the status code. |
 | `model_version` | string \| null | Served model version; `null` without a model. |
-| `api_version` | string | `predmaint.__version__`. |
+| `api_version` | string | `predmaint.__version__` (0.2.0 since M8). |
+| `intervals_loaded` | bool | Whether a prediction-interval artifact matching the served model is loaded (ADR-034). |
 
 ## 3. `POST /predict`
 
@@ -71,10 +74,17 @@ Without a model, e.g. `MODEL_PATH=/nonexistent` (200):
 `curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request_min.json`:
 
 ```json
-{"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":30,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[]}
+{"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":30,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[],"rul_lower":118.45,"rul_upper":125.0,"interval_level":0.8}
 ```
 
-The same call with `examples/predict_request.json` (31 records) returns the identical prediction with `"cycles_received":31`. The late-life example `examples/predict_request_late.json` (test engine 34, 203 records, true RUL 7) returns `"predicted_rul":6.3,"health_status":"critical"` (sidecar; reproduced through the API by `tests/test_real_data.py` and shown by the dashboard in M5). The expected values are recorded in `examples/expected_predictions.json`. Engine 1's true RUL at cycle 31 is 112; with only 31 cycles of early-life history, the model's prediction sits at the 125 cap.
+Since M8 (CR-008) responses also carry the interval fields. Real bodies from the M8 local API:
+
+```json
+{"unit_id":"test-unit-34","predicted_rul":6.3,"health_status":"critical","cycles_received":203,"cycles_used":30,"last_cycle":203,"model_version":"primary-20261108-f4c86df","warnings":[],"rul_lower":4.84,"rul_upper":18.76,"interval_level":0.8}
+{"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":31,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[],"rul_lower":118.45,"rul_upper":125.0,"interval_level":0.8}
+```
+
+The same call with `examples/predict_request.json` (31 records) returns the identical prediction with `"cycles_received":31`. The late-life example `examples/predict_request_late.json` (test engine 34, 203 records, true RUL 7) returns `"predicted_rul":6.3,"health_status":"critical"` with interval [4.84, 18.76] (sidecar; reproduced through the API by `tests/test_real_data.py` and shown by the dashboard in M5). The expected values are recorded in `examples/expected_predictions.json`. Engine 1's true RUL at cycle 31 is 112; with only 31 cycles of early-life history, the model's prediction sits at the 125 cap.
 
 | Field | Type | Rule |
 |---|---|---|
@@ -86,6 +96,8 @@ The same call with `examples/predict_request.json` (31 records) returns the iden
 | `last_cycle` | int | `cycle` of the last record. |
 | `model_version` | string | Served model version. |
 | `warnings` | array of string | Out-of-training-range messages (§3.3 rule 5). |
+| `rul_lower` / `rul_upper` | float \| null | Bounds of the prediction interval (ADR-034): clamped to [0, `rul_cap`], `rul_lower ≤ predicted_rul ≤ rul_upper`, rounded to 2 decimals. `null` when no matching interval artifact is loaded (point prediction unchanged). |
+| `interval_level` | float \| null | Nominal level, 0.8 (q0.1–q0.9); `null` without intervals. Empirical coverage is below nominal and is 0 for true RUL > 125 against unclipped truth (16 §9). |
 
 ## 4. `GET /model/info`
 
@@ -113,7 +125,10 @@ The same call with `examples/predict_request.json` (31 records) returns the iden
   "test": {"mae": 12.566732875707899, "rmse": 16.609852374016835, "nasa_score": 441.5350326191249},
   "test_clipped_truth": {"mae": 11.496732875707899, "rmse": 15.333382373407852}
  },
- "sklearn_version_match": true
+ "sklearn_version_match": true,
+ "intervals": {"for_model_version": "primary-20261108-f4c86df", "method": "HistGradientBoostingRegressor(loss='quantile') at q=0.1 and q=0.9 (ADR-034)", "quantiles": [0.1, 0.9], "interval_level": 0.8, "trained_at": "2026-11-08T18:55:47Z",
+   "cv_oof": {"n": 17731, "coverage_unclipped": 0.5087699509333935, "coverage_clipped": 0.7370706671930517, "mean_width": 37.196710409508896, "median_width": 36.658377404963076, "n_reordered": 1023},
+   "test": {"n": 100, "coverage_unclipped": 0.74, "coverage_clipped": 0.82, "mean_width": 42.12697130358668, "median_width": 41.95713193422868, "n_reordered": 8}}
 }
 ```
 
@@ -123,7 +138,7 @@ All fields come from `model_metadata.json` (05 §9), except `n_features` (= `len
 
 ### 4.3 Required fields (FR-012)
 
-`model_name, model_version, trained_at, git_sha, selected_by, data_subset, train_sha256, window_size, rul_cap, n_features, required_sensors, feature_names, health_bands, metrics, sklearn_version_match`.
+`model_name, model_version, trained_at, git_sha, selected_by, data_subset, train_sha256, window_size, rul_cap, n_features, required_sensors, feature_names, health_bands, metrics, sklearn_version_match`, plus `intervals` (object or `null`, ADR-034).
 
 ## 5. Status codes
 

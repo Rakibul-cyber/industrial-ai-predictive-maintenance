@@ -69,6 +69,9 @@ class PredictResponse(BaseModel):
                     "last_cycle": 31,
                     "model_version": "primary-20261108-f4c86df",
                     "warnings": [],
+                    "rul_lower": 98.4,
+                    "rul_upper": 125.0,
+                    "interval_level": 0.8,
                 }
             ]
         }
@@ -82,6 +85,15 @@ class PredictResponse(BaseModel):
     last_cycle: int
     model_version: str
     warnings: list[str]
+    rul_lower: float | None = Field(
+        default=None, description="Lower bound of the prediction interval, or null (ADR-034)."
+    )
+    rul_upper: float | None = Field(
+        default=None, description="Upper bound of the prediction interval, or null (ADR-034)."
+    )
+    interval_level: float | None = Field(
+        default=None, description="Nominal interval level (0.8), or null without intervals."
+    )
 
 
 class HealthResponse(BaseModel):
@@ -91,6 +103,7 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     model_version: str | None
     api_version: str
+    intervals_loaded: bool
 
 
 class CvMetrics(BaseModel):
@@ -117,6 +130,29 @@ class ModelMetrics(BaseModel):
     test_clipped_truth: ClippedTestMetrics
 
 
+class IntervalCoverage(BaseModel):
+    n: int
+    coverage_unclipped: float
+    coverage_clipped: float
+    mean_width: float
+    median_width: float
+    n_reordered: int
+
+
+class IntervalsInfo(BaseModel):
+    """Prediction-interval artifact summary (ADR-034)."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    for_model_version: str
+    method: str
+    quantiles: list[float]
+    interval_level: float
+    trained_at: str
+    cv_oof: IntervalCoverage
+    test: IntervalCoverage
+
+
 class ModelInfoResponse(BaseModel):
     """Served model identity, provenance and metrics, from ``model_metadata.json``."""
 
@@ -137,6 +173,7 @@ class ModelInfoResponse(BaseModel):
     health_bands: dict[str, int]
     metrics: ModelMetrics
     sklearn_version_match: bool
+    intervals: IntervalsInfo | None = None
 
 
 class ErrorBody(BaseModel):

@@ -120,3 +120,27 @@ Append to the "Change records" section below **before** implementing, and get us
 | Affected docs | 00, 13, 14, 15, CLAUDE.md. |
 | Regression tests | Full `pytest -q`, `ruff check .`, `ruff format --check .`; no test change needed (`tests/test_api.py` asserts only `"RUL" in title`). |
 | Approval | Requested by the user on 2026-11-08 (CR-007). |
+
+### CR-008 — Prediction intervals (post-MVP extension, Milestone 8) (2026-11-08)
+
+| Field | Content |
+|---|---|
+| Reason | Approved scope extension (§1.4), not a defect. The evaluation report (16 §7) lists "no uncertainty estimate" as a limitation; the user authorized Milestone 8 on 2026-11-08. |
+| Evidence | 16 §7–8 ("Prediction intervals — NOT IMPLEMENTED"); M8 authorization message. |
+| Impact | New artifact pair (`models/model_intervals.joblib` + metadata), new training mode (`scripts/train.py --model intervals`), additive API fields (`rul_lower`, `rul_upper`, `interval_level`, `/health.intervals_loaded`, `/model/info.intervals`), dashboard band display, `api_version` 0.2.0. The point model and its artifact are unchanged. |
+| Smallest fix | Two quantile `HistGradientBoostingRegressor`s with the served model's hyperparameters and feature pipeline (ADR-034); no search; graceful fallback to null intervals. |
+| Affected docs | 00, 01, 05, 06, 08, 09, 10, 11, 12, 13, 14, 16, 17, README, CLAUDE.md. |
+| Regression tests | New interval tests (training, invariants, inference with/without/mismatched intervals, API, dashboard, real-data coverage); full suite with the 85 % gate. |
+| Approval | Authorized by the user on 2026-11-08 (M8 authorization). |
+
+### CR-009 — Smoke test collided with a running demo stack (2026-11-08, M8)
+
+| Field | Content |
+|---|---|
+| Reason | Defect (§1.2) found during M8 verification. |
+| Evidence | `bash scripts/smoke_test.sh` → exit 1: "Bind for 127.0.0.1:8000 failed: port is already allocated". A user-started `predmaint` stack (created 18:52:36Z from the repo, `api_version` 0.1.0) held ports 8000/8501. Both compose and the script hard-coded those ports (a known limit in 10 §10). |
+| Impact | `docker-compose.yml` host ports and `scripts/smoke_test.sh` only; default behaviour unchanged (8000/8501). The user's running stack was not touched. |
+| Smallest fix | Compose host ports `${API_HOST_PORT:-8000}` / `${DASHBOARD_HOST_PORT:-8501}`; the smoke test exports 18000/18501 by default (`SMOKE_API_PORT`, `SMOKE_DASHBOARD_PORT`) and curls those ports. |
+| Affected docs | 10, 14. |
+| Regression tests | Smoke test re-run while the demo stack was still up; CI `docker` job on the next push. |
+| Approval | Defect fix within the authorized milestone (M8). |

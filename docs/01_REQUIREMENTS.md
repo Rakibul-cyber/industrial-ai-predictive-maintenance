@@ -24,6 +24,8 @@ Each requirement has a measurable acceptance criterion and traces to the milesto
 | FR-016 | Dashboard handles API failure. | With the API stopped, the dashboard shows an error message naming `API_BASE_URL` and does not crash; API 4xx error messages are shown verbatim. | M5 | **Met** — `tests/test_dashboard_app.py::test_app_survives_api_down` |
 | FR-017 | Containerised deployment. | `docker compose up --build` starts `api` (port 8000) and `dashboard` (port 8501); `api` healthcheck reports healthy only when `model_loaded` is true (ADR-028); the dashboard waits for a healthy `api`; `scripts/smoke_test.sh` passes locally (arm64) and in the CI `docker` job (amd64). | M6 | **Met** — `bash scripts/smoke_test.sh` (arm64 local; amd64 CI run 42509206610); M7 fresh-clone Option A |
 
+| FR-018 | Prediction interval (M8, CR-008, ADR-034). | `POST /predict` returns `rul_lower ≤ predicted_rul ≤ rul_upper`, both in [0, 125], with `interval_level` 0.8, when the interval artifact matches the served model, and nulls otherwise (point prediction byte-identical). `/health.intervals_loaded` and `/model/info.intervals` reflect the state. Empirical coverage of the nominal 80 % interval and mean width are measured on out-of-fold CV and the official test set (overall and per true-RUL bucket, unclipped and clipped truth) and recorded in metadata, `reports/metrics_intervals.json` and 16. No target coverage is promised. | M8 | **Met** — `tests/test_intervals.py`, `tests/test_api.py` (with/absent/mismatch), `tests/test_real_data.py` (committed artifact reproduces test coverage); smoke test asserts `lower ≤ point ≤ upper`; measured coverage in 16 §9 |
+
 ## Non-functional requirements
 
 | ID | Requirement | Acceptance criterion | Milestone | Final status (M7) |

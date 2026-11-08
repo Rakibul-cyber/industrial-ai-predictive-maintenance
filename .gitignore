@@ -7,10 +7,12 @@ data/*
 # can `docker compose up` without training. Candidate artifacts stay local.
 models/*.joblib
 !models/model.joblib
+!models/model_intervals.joblib
 models/*.pkl
 # Per-candidate metadata stays local; reports/metrics_<name>.json is the committed record (ADR-023).
 models/*_metadata.json
 !models/model_metadata.json
+!models/model_intervals_metadata.json
 
 # --- Python ---
 __pycache__/

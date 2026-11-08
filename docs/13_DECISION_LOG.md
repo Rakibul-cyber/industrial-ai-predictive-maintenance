@@ -37,6 +37,7 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 | ADR-031 | Dataset in containers: `./data` bind mount, dashboard downloads on first start | Accepted (2026-11-08, user-directed) |
 | ADR-032 | One image (single stage, digest-pinned, model baked in), two compose services | Accepted (2026-11-08, user-directed) |
 | ADR-033 | Project renamed "Industrial AI — Predictive Maintenance Platform"; anomaly detection stays an unauthorized extension | Accepted (2026-11-08, user-directed, CR-007) |
+| ADR-034 | Prediction intervals: two quantile HGB models (q0.1/q0.9), separate artifact, graceful fallback | Accepted (2026-11-08, user-directed, CR-008) |
 
 ---
 
@@ -282,3 +283,19 @@ ADR-001…021 dated **2026-11-08** (Milestone 0); architecture freeze approved b
 - **Decision:** the project is named **"Industrial AI — Predictive Maintenance Platform"**. Anomaly detection remains an optional, **unauthorized** extension, mentioned only as planned / NOT IMPLEMENTED (doc 00 out-of-scope list, CLAUDE.md candidate milestones, 16 §8, README "Limitations and future work").
 - **Alternatives:** implement anomaly detection (scope creep, R13); keep the old title with a disclaimer (still misleading at a glance).
 - **Consequences:** naming only; no code, API, model or test change (the code titles never contained the old title). ADR-001's scope decision stands; only its naming consequence is superseded.
+
+### ADR-034 — Prediction intervals via quantile gradient boosting (Milestone 8)
+
+- **Context:** CR-008. The served point model gives no uncertainty estimate (16 §7).
+- **Decision:**
+  - **Method:** two extra `HistGradientBoostingRegressor(loss="quantile")` models at `quantile=0.1` and `0.9`, forming a nominal **80 %** interval. They use the identical feature pipeline (select step + 43 features), the same train-row filter and seed, and the served primary model's hyperparameters, read from `models/model_metadata.json`. There is no search. The point model is not retrained and its artifact does not change.
+  - **Post-processing:** clamp both bounds to [0, RUL_CAP]; then `lower = min(lower, point)` and `upper = max(upper, point)`. The number of adjusted predictions (reorders) is counted and reported.
+  - **Artifact:** `models/model_intervals.joblib` (dict of the two pipelines) + `models/model_intervals_metadata.json` (`for_model_version`, quantiles, hyperparameters, evaluation). Both are committed, copied into the image and loaded at startup next to `MODEL_PATH`. If the artifact is absent, unloadable, or its `for_model_version` ≠ the loaded point model, the API logs a warning and returns null interval fields; point predictions are unchanged in every case.
+  - **API (additive):** `/predict` gains `rul_lower`, `rul_upper`, `interval_level`; `/health` gains `intervals_loaded`; `/model/info` gains `intervals` (or null); `api_version` 0.2.0.
+  - **Evaluation:** coverage and width on 5-fold GroupKFold out-of-fold predictions and on the official test set (last cycle), overall and by true-RUL bucket, against unclipped and clipped truth. Nothing is tuned toward 80 %.
+- **Alternatives:** conformal prediction on CV residuals (distribution-free marginal coverage, but a constant or residual-scaled width needs extra calibration data handling); bootstrap ensembles (several times the training cost); NGBoost/probabilistic models (new dependency).
+- **Rationale:** reuses the existing model family and pipeline, needs no new dependency, and produces input-dependent widths.
+- **Consequences:**
+  - Quantile models are trained on capped labels and bounds are clamped at 125, so engines whose true RUL exceeds 125 cannot be covered against unclipped truth; this is expected and reported, not fixed.
+  - Quantile crossing is possible and is handled by the ordering rule.
+  - Retraining order: train/select the point model first, then `--model intervals`; commit the four model files together.

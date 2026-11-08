@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **MVP COMPLETE** — M0–M7 complete (2026-11-08); post-MVP change **CR-007** (project rename) applied, uncommitted, awaiting review. |
+| Current milestone | **MVP COMPLETE** (M0–M7) + **Milestone 8 (prediction intervals, CR-008) COMPLETE** — uncommitted, awaiting review. |
 | Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `32fdae0` "feat: Finalize M7 deliverables, including risk register, project status, and evaluation report" (M7, committed and pushed by the user). CR-007 edits are uncommitted. |
-| Next approved action | The user reviews and commits CR-007; adds the four screenshots under `docs/img/`. Any further work goes through change control (15). |
+| Git ref | `main` = `origin/main` @ `8d893ff` (CR-007 rename, committed and pushed by the user; CI run 42511719150 green). M8 work is uncommitted. |
+| Next approved action | User review and commit of M8 (the push runs the CI `docker` job with the interval assertions). Restart your running demo stack with `--build`; it still runs the pre-M8 image. Add the four screenshots under `docs/img/`. Further work goes through 15. |
 
 ## Milestone tracker
 
@@ -18,7 +18,8 @@
 | M4 API (CR-004) | **Accepted** 2026-11-08; committed `7d7de29`, pushed; CI green | M4 section below |
 | M5 Dashboard (CR-005) | **Accepted** 2026-11-08; committed `6b4da81`, pushed; CI green | M5 section below |
 | M6 Docker, tests, CI (ADR-030–032) | **Accepted** 2026-11-08; committed `ccf68a7`, pushed; CI green incl. `docker` job (amd64) | M6 section below |
-| M7 Finalisation | **COMPLETE** 2026-11-08 (uncommitted, awaiting final commit) | M7 section below |
+| M7 Finalisation | **COMPLETE** 2026-11-08; committed `32fdae0` | M7 section below |
+| M8 Prediction intervals (CR-008, ADR-034) | **COMPLETE** 2026-11-08 (uncommitted, awaiting review) | M8 section below |
 
 ## M0 — what was verified (actual command results)
 
@@ -442,6 +443,54 @@ Title changed from "Industrial AI — Predictive Maintenance & Anomaly Detection
 
 No occurrence implies the feature exists. None appear in `src/`, `tests/` or `scripts/`.
 
+## M8 — prediction intervals (2026-11-08)
+
+**Start:** working tree clean; `main` = `origin/main` @ `8d893ff`; CI run [42511719150](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/runs/42511719150) green. **Change control:** CR-008, ADR-034, FR-018, doc 00 scope, M8 plan; CR-009 (smoke-test port collision, below).
+
+**Point model untouched:** SHA-256 of `models/model.joblib` (`39bfa6fd…28c1`) and `models/model_metadata.json` (`57f80600…dcfd`) recorded before M8 and re-checked after training, smoke test and final run: `OK` / `OK`.
+
+```text
+$ python scripts/train.py --model intervals
+Intervals for served model primary-20261108-f4c86df: quantiles (0.1, 0.9) (nominal 80%), hyperparameters {'learning_rate': 0.05, 'max_iter': 200, 'max_leaf_nodes': 15, 'l2_regularization': 0.0}
+5-fold GroupKFold out-of-fold: n=17731 coverage(unclipped)=0.509 coverage(clipped)=0.737 mean width=37.20 median width=36.66 reordered=1023
+  bucket     n    cov_unclipped  cov_clipped  mean_width  median_width
+  0-20      2100          0.768        0.768       32.13         29.73
+  21-60     4000          0.627        0.627       43.91         43.94
+  61-125    6392          0.767        0.767       43.63         45.54
+  >125      5239          0.000        0.773       26.25         21.94
+Official test set (last cycle): n=100 coverage(unclipped)=0.740 coverage(clipped)=0.820 mean width=42.13 median width=41.96 reordered=8
+  0-20        16          0.938        0.938       27.72         20.45
+  21-60       23          0.826        0.826       49.35         43.94
+  61-125      50          0.800        0.800       44.35         49.85
+  >125        11          0.000        0.727       37.85         39.73
+Timings: CV 14.3 s (3 models x 5 folds), final fit 1.8 s (2 quantile models)
+Elapsed: 16.4 s     [time: 83.19s user 32.64s system 630% cpu 18.364 total]
+$ API_PORT=8001 python -m predmaint.api.main   (8000 held by the user's demo stack)
+  log: Loaded model primary-20261108-f4c86df … / Loaded prediction intervals (80 %) from models/model_intervals.joblib
+$ curl /health → {"status":"ok","model_loaded":true,"model_version":"primary-20261108-f4c86df","api_version":"0.2.0","intervals_loaded":true}
+$ curl /predict @examples/predict_request_late.json → … "predicted_rul":6.3,"health_status":"critical", … "rul_lower":4.84,"rul_upper":18.76,"interval_level":0.8}
+$ curl /predict @examples/predict_request.json (engine 1) → … "predicted_rul":125.0,"health_status":"healthy", … "rul_lower":118.45,"rul_upper":125.0,"interval_level":0.8}
+$ bash scripts/smoke_test.sh; echo $?   (1st attempt)
+  exit 1 — "Bind for 127.0.0.1:8000 failed: port is already allocated"
+$ bash scripts/smoke_test.sh; echo $?   (after CR-009)
+  /health → {… "api_version":"0.2.0","intervals_loaded":true}
+  /predict late → {… "predicted_rul":6.3,"health_status":"critical", … "rul_lower":4.84,"rul_upper":18.76,"interval_level":0.8}
+  SMOKE TEST PASSED (arm64) · exit code: 0
+$ ls -l models/*.joblib → model.joblib 451385 · model_intervals.joblib 899705 · (candidates: primary 451385, baseline 5297, not committed)
+$ docker images predmaint → 1.11GB (content 243,180,146 bytes); /app/models contains all four committed model files
+$ ruff check . → All checks passed!  ·  ruff format --check . → 68 files already formatted
+$ pytest -q → Required test coverage of 85% reached. Total coverage: 95.42% · 208 passed, 2 skipped
+$ pytest -q -m data --no-cov → 12 passed · DATA_DIR=/nonexistent pytest -q → 199 passed, 11 skipped (gate reached)
+```
+
+**Findings:**
+
+- Coverage is below the nominal 80 % out-of-fold in every bucket. As expected, it is 0 for true RUL > 125 against unclipped truth because of the cap. Reported in 16 §9, not tuned. Sidecar: late example 6.3 in [4.84, 18.76] (covers true 7); engine 1 125.0 in [118.45, 125.0] (does not cover true 112).
+- In the synthetic test fixture Ridge wins CV, so a served baseline correctly makes interval training refuse (ADR-034 needs the served HGB hyperparameters). The fixture therefore promotes the primary explicitly (as `promote()` writes it), and a dedicated test covers the refusal.
+- Two existing tests that assert exact response bodies (`/health` without a model; `/predict` == `predict_rul`) gained the new fields. That is a pure schema addition; no other existing assertion changed. `api_version` comes from `predmaint.__version__` (now 0.2.0), so no version literal changed in tests.
+- **CR-009:** a demo stack started from this repo at 18:52:36Z (pre-M8 image, `api_version` 0.1.0) held ports 8000/8501, so the first smoke-test attempt failed. That stack was **not** stopped or modified. Fix: compose host ports via `API_HOST_PORT`/`DASHBOARD_HOST_PORT` (defaults unchanged), and the smoke test uses 18000/18501. The CI `docker` job will exercise the new interval assertions on the next push.
+- Coverage of `src/predmaint`: 95.42 % (from 94.98 %).
+
 ## Measured results
 
 | Item | Value | Source |
@@ -463,3 +512,4 @@ No occurrence implies the feature exists. None appear in `src/`, `tests/` or `sc
 | Smoke test (arm64) | PASSED, exit 0; forced failure exit 1 | M6 |
 | Coverage (after M6) | 94.98 % (gate 85 %) | `pytest -q` |
 | **Final (M7)** | 187 passed, 2 skipped (opt-in); 11 real-data tests passed; coverage 94.98 % (gate 85 %); CI run 42509206610 green (lint-test + docker) | M7 |
+| **M8** | 208 passed, 2 skipped; 12 real-data tests; coverage 95.42 %; intervals CV coverage 0.509 / 0.737 (unclipped / clipped), test 0.740 / 0.820; smoke test exit 0 | M8 |

@@ -133,3 +133,37 @@ def test_app_without_dataset_keeps_status_and_model_info(
     assert any("download_data.py" in i.value for i in at.info)
     assert at.table  # model info tables still render
     assert not api_up  # no predictions without data
+
+
+def test_app_renders_interval_fields(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    info = {
+        **INFO,
+        "intervals": {
+            "for_model_version": "test-v1",
+            "method": "quantile HGB",
+            "quantiles": [0.1, 0.9],
+            "interval_level": 0.8,
+            "trained_at": "2026-11-08T19:00:00Z",
+            "cv_oof": {"n": 10, "coverage_unclipped": 0.51, "coverage_clipped": 0.74,
+                       "mean_width": 37.2, "median_width": 36.7, "n_reordered": 3},
+            "test": {"n": 4, "coverage_unclipped": 0.74, "coverage_clipped": 0.82,
+                     "mean_width": 42.1, "median_width": 42.0, "n_reordered": 0},
+        },
+    }  # fmt: skip
+    monkeypatch.setattr(ApiClient, "health", lambda self: ApiResult(True, 200, HEALTH))
+    monkeypatch.setattr(ApiClient, "model_info", lambda self: ApiResult(True, 200, info))
+
+    def predict(self: ApiClient, payload: dict[str, Any]) -> ApiResult:
+        body = _prediction(payload) | {"rul_lower": 30.5, "rul_upper": 55.25, "interval_level": 0.8}
+        return ApiResult(True, 200, body)
+
+    monkeypatch.setattr(ApiClient, "predict", predict)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    assert not at.exception
+    assert any("80% interval: 30.5 – 55.2 cycles" in c.value for c in at.caption)
+    at.button[0].click().run()  # trajectory with a shaded band
+    assert not at.exception
+    assert {"rul_lower", "rul_upper"} <= set(at.dataframe[0].value.columns)
+    assert any("Shaded: 80 % prediction interval" in c.value for c in at.caption)
+    assert len(at.table) >= 3  # model card, intervals, metrics

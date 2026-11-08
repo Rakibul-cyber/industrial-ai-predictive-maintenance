@@ -2,6 +2,7 @@
 
 import json
 import logging
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,8 @@ from predmaint.data.load import load_fd001
 from predmaint.models.predict import (
     InvalidValuesError,
     clear_model_cache,
+    interval_path_for,
+    load_interval_model,
     load_model,
     predict_rul,
 )
@@ -76,6 +79,7 @@ def test_health_without_model_is_200_degraded(no_model_client: TestClient) -> No
         "model_loaded": False,
         "model_version": None,
         "api_version": __version__,
+        "intervals_loaded": False,
     }
 
 
@@ -96,7 +100,11 @@ def test_predict_matches_predict_rul(
     response = client.post("/predict", json=payload)
     assert response.status_code == 200, response.text
     body = response.json()
-    direct = predict_rul(payload["records"], load_model(model_path))
+    direct = predict_rul(
+        payload["records"],
+        load_model(model_path),
+        load_interval_model(interval_path_for(model_path)),
+    )
     assert body == {
         "unit_id": "engine-2",
         "predicted_rul": round(direct.predicted_rul, 2),
@@ -106,6 +114,9 @@ def test_predict_matches_predict_rul(
         "last_cycle": 40,
         "model_version": direct.model_version,
         "warnings": direct.warnings,
+        "rul_lower": round(direct.rul_lower, 2),
+        "rul_upper": round(direct.rul_upper, 2),
+        "interval_level": 0.8,
     }
     assert 0 <= body["predicted_rul"] <= 125
 
@@ -288,3 +299,71 @@ def test_openapi_metadata(client: TestClient) -> None:
     assert spec["info"]["version"] == __version__
     assert "RUL" in spec["info"]["title"]
     assert {"/health", "/predict", "/model/info"} <= set(spec["paths"])
+
+
+# --- prediction intervals (ADR-034) ---------------------------------------------------------
+INTERVAL_SUMMARY_KEYS = {
+    "n",
+    "coverage_unclipped",
+    "coverage_clipped",
+    "mean_width",
+    "median_width",
+    "n_reordered",
+}
+
+
+def _client_with_interval_variant(
+    served_model_dir: Path, tmp_path: Path, variant: str
+) -> TestClient:
+    models = tmp_path / "models"
+    shutil.copytree(served_model_dir / "models", models)
+    if variant == "absent":
+        (models / "model_intervals.joblib").unlink()
+        (models / "model_intervals_metadata.json").unlink()
+    elif variant == "mismatch":
+        meta_path = models / "model_intervals_metadata.json"
+        meta = json.loads(meta_path.read_text())
+        meta_path.write_text(json.dumps({**meta, "for_model_version": "primary-19990101-0000000"}))
+    clear_model_cache()
+    return TestClient(create_app(model_path=models / "model.joblib"))
+
+
+def test_health_and_info_report_intervals(client: TestClient) -> None:
+    assert client.get("/health").json()["intervals_loaded"] is True
+    info = client.get("/model/info").json()["intervals"]
+    assert info["quantiles"] == [0.1, 0.9] and info["interval_level"] == 0.8
+    assert info["for_model_version"] == client.get("/health").json()["model_version"]
+    for split in ("cv_oof", "test"):
+        assert set(info[split]) == INTERVAL_SUMMARY_KEYS
+
+
+def test_predict_interval_fields(client: TestClient, payload: dict[str, Any]) -> None:
+    body = client.post("/predict", json=payload).json()
+    assert body["interval_level"] == 0.8
+    assert 0 <= body["rul_lower"] <= body["predicted_rul"] <= body["rul_upper"] <= 125
+
+
+@pytest.mark.parametrize("variant", ["absent", "mismatch"])
+def test_intervals_unavailable_serves_point_only(
+    served_model_dir: Path,
+    tmp_path: Path,
+    client: TestClient,
+    payload: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+    variant: str,
+) -> None:
+    with_intervals = client.post("/predict", json=payload).json()
+    with (
+        caplog.at_level(logging.WARNING, logger="predmaint.api"),
+        _client_with_interval_variant(served_model_dir, tmp_path, variant) as other,
+    ):
+        health = other.get("/health").json()
+        body = other.post("/predict", json=payload).json()
+        info = other.get("/model/info").json()
+    assert health["model_loaded"] is True and health["intervals_loaded"] is False
+    assert (
+        body["rul_lower"] is None and body["rul_upper"] is None and body["interval_level"] is None
+    )
+    assert body["predicted_rul"] == with_intervals["predicted_rul"]  # point unchanged
+    assert info["intervals"] is None
+    assert any("Prediction intervals" in r.getMessage() for r in caplog.records)

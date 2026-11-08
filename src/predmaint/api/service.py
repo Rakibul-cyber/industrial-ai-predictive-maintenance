@@ -11,11 +11,20 @@ from typing import Any
 import pandas as pd
 import sklearn
 
-from predmaint.api.schemas import ModelInfoResponse, PredictRequest, PredictResponse
+from predmaint.api.schemas import (
+    IntervalsInfo,
+    ModelInfoResponse,
+    PredictRequest,
+    PredictResponse,
+)
 from predmaint.data.load import SENSOR_COLUMNS, SETTING_COLUMNS
 from predmaint.models.predict import (
+    IntervalModel,
     LoadedModel,
     ModelNotAvailableError,
+    interval_mismatch,
+    interval_path_for,
+    load_interval_model,
     load_model,
     predict_rul,
 )
@@ -30,6 +39,7 @@ class ModelService:
         self.model_path = model_path
         self.model: LoadedModel | None = None
         self.load_error: str | None = None
+        self.intervals: IntervalModel | None = None
 
     def load(self) -> None:
         """Load the model once; on failure keep running in degraded mode (ADR-022/028)."""
@@ -40,6 +50,22 @@ class ModelService:
             logger.warning("Model not available, serving in degraded mode: %s", exc)
             return
         logger.info("Loaded model %s from %s", self.model.model_version, self.model_path)
+        self._load_intervals(self.model)
+
+    def _load_intervals(self, model: LoadedModel) -> None:
+        """Load the matching interval artifact; otherwise warn and serve point predictions only."""
+        path = interval_path_for(self.model_path)
+        try:
+            intervals = load_interval_model(path)
+        except ModelNotAvailableError as exc:
+            logger.warning("Prediction intervals not available, serving point predictions: %s", exc)
+            return
+        reason = interval_mismatch(intervals, model)
+        if reason is not None:
+            logger.warning("Prediction intervals ignored, serving point predictions: %s", reason)
+            return
+        self.intervals = intervals
+        logger.info("Loaded prediction intervals (%.0f %%) from %s", intervals.level * 100, path)
 
     def require_model(self) -> LoadedModel:
         """Return the model or raise :class:`ModelNotAvailableError` (→ 503)."""
@@ -53,7 +79,7 @@ class ModelService:
         """Run ``predict_rul`` on the request records and shape the response."""
         model = self.require_model()
         records = [record.model_dump() for record in request.records]
-        result = predict_rul(records, model)
+        result = predict_rul(records, model, self.intervals)
         return PredictResponse(
             unit_id=request.unit_id,
             predicted_rul=round(result.predicted_rul, 2),
@@ -63,6 +89,9 @@ class ModelService:
             last_cycle=result.last_cycle,
             model_version=result.model_version,
             warnings=result.warnings,
+            rul_lower=None if result.rul_lower is None else round(result.rul_lower, 2),
+            rul_upper=None if result.rul_upper is None else round(result.rul_upper, 2),
+            interval_level=result.interval_level,
         )
 
     def model_info(self) -> ModelInfoResponse:
@@ -89,6 +118,21 @@ class ModelService:
                 "test_clipped_truth": metrics["test_clipped_truth"],
             },
             sklearn_version_match=meta["library_versions"]["scikit-learn"] == sklearn.__version__,
+            intervals=self._intervals_info(),
+        )
+
+    def _intervals_info(self) -> IntervalsInfo | None:
+        if self.intervals is None:
+            return None
+        meta = self.intervals.metadata
+        return IntervalsInfo(
+            for_model_version=meta["for_model_version"],
+            method=meta["method"],
+            quantiles=meta["quantiles"],
+            interval_level=meta["interval_level"],
+            trained_at=meta["trained_at"],
+            cv_oof=meta["evaluation"]["cv_oof"]["overall"],
+            test=meta["evaluation"]["test"]["overall"],
         )
 
 
@@ -105,10 +149,13 @@ def request_payload(frame: pd.DataFrame, unit_id: str | None = None) -> dict[str
 
 
 def expected_prediction(
-    payload: dict[str, Any], model: LoadedModel, true_rul: int | None = None
+    payload: dict[str, Any],
+    model: LoadedModel,
+    true_rul: int | None = None,
+    intervals: IntervalModel | None = None,
 ) -> dict[str, Any]:
     """Offline reference for a demo payload: what ``POST /predict`` must return for it."""
-    result = predict_rul(payload["records"], model)
+    result = predict_rul(payload["records"], model, intervals)
     return {
         "unit_id": payload["unit_id"],
         "cycles_received": result.cycles_received,
@@ -116,5 +163,8 @@ def expected_prediction(
         "predicted_rul": round(result.predicted_rul, 2),
         "health_status": result.health_status,
         "model_version": result.model_version,
+        "rul_lower": None if result.rul_lower is None else round(result.rul_lower, 2),
+        "rul_upper": None if result.rul_upper is None else round(result.rul_upper, 2),
+        "interval_level": result.interval_level,
         "true_rul_at_last_cycle": true_rul,
     }

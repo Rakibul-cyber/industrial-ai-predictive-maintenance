@@ -19,6 +19,7 @@ Likelihood (L) / Impact (I): Low, Med, High. Reviewed at the end of every milest
 | R13 | **Scope creep** (anomaly detection, other subsets, deep learning, MLflow, cloud). | High | Med | Out-of-scope list (00 §6); CLAUDE.md milestone rules; 15 change control. | Defer to a post-M7 extension backlog. |
 | R14 | **Time overrun** vs ≈ 22 h estimate. | Med | Med | Small milestones with explicit acceptance; critical path tracked in 08. | Cut M5 polish (charts) before cutting tests or docs. |
 | R15 | **Unsafe artifact loading** (joblib = pickle). The served pickle is now committed (ADR-030). | Low | High | Loaded only from the configured local `MODEL_PATH`, which is baked into the image; never accept uploaded models (NFR-010); review model-file changes in PRs like code. | — |
+| R16 | **Interval miscalibration (M8).** Quantile crossing (lower > point or upper < point) and the cap (bounds ≤ 125) distort coverage: out-of-fold coverage is below the nominal 80 % in every bucket and is 0 for true RUL > 125 against unclipped truth. | High (measured) | Med | Ordering rule with reorder counts (CV 1,023 / 17,731; test 8 / 100); coverage reported by bucket for clipped and unclipped truth (16 §9); docs describe the interval as approximate, not calibrated. | Conformal calibration on out-of-fold residuals (candidate next milestone, NOT IMPLEMENTED); or serve point predictions only (null bounds) by removing the interval artifact. |
 
 ## Final status (M7, 2026-11-08)
 
@@ -39,3 +40,4 @@ Likelihood (L) / Impact (I): Low, Med, High. Reviewed at the end of every milest
 | R13 | Closed | Scope held to the MVP; extensions listed as NOT IMPLEMENTED (16 §8). |
 | R14 | Closed | MVP delivered (M0–M7). |
 | R15 | Mitigated | Model loaded only from the baked-in `MODEL_PATH`; no upload path. |
+| R16 | Accepted (measured) | Added in M8; miscalibration documented, not hidden (16 §9). |

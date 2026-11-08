@@ -363,7 +363,7 @@ def run_training(
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint used by ``scripts/train.py``. Returns a process exit code.
 
-    Usage: ``--model baseline``, ``--model primary``, then ``--select``.
+    Usage: ``--model baseline``, ``--model primary``, ``--select``, then ``--model intervals``.
     """
     settings = get_settings()
     parser = argparse.ArgumentParser(
@@ -371,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
         "served model from trained candidates (--select, ADR-024)."
     )
     action = parser.add_mutually_exclusive_group(required=True)
-    action.add_argument("--model", choices=MODEL_NAMES)
+    action.add_argument("--model", choices=(*MODEL_NAMES, "intervals"))
     action.add_argument("--select", action="store_true")
     parser.add_argument("--data-dir", type=Path, default=settings.data_dir)
     parser.add_argument("--model-dir", type=Path, default=settings.model_dir)
@@ -380,6 +380,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.select:
             promote(args.model_dir, args.reports_dir)
+        elif args.model == "intervals":
+            from predmaint.models.intervals import run_interval_training
+
+            run_interval_training(
+                args.data_dir / "raw" / "CMAPSSData", args.model_dir, args.reports_dir
+            )
         else:
             run_training(
                 args.model, args.data_dir / "raw" / "CMAPSSData", args.model_dir, args.reports_dir

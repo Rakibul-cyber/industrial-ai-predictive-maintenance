@@ -13,6 +13,8 @@ from predmaint.dashboard.helpers import (
     compute_trajectory,
     engine_history,
     engine_payload,
+    interval_band,
+    interval_text,
     sensor_chart_frame,
     trajectory_cycles,
     true_rul,
@@ -92,9 +94,13 @@ def test_compute_trajectory(data: Any) -> None:
         "cycle",
         "predicted_rul",
         "health_status",
+        "rul_lower",
+        "rul_upper",
         "true_rul",
         "true_rul_capped",
     ]
+    assert frame["rul_lower"].isna().all()  # the fake API sends no interval fields
+    assert interval_band(frame) is None
     assert frame["predicted_rul"].tolist() == [70.0, 65.0, 60.0, 55.0]
     assert frame["true_rul"].tolist() == [15, 10, 5, 0]
 
@@ -120,3 +126,33 @@ def test_sensor_chart_frame_is_long_and_standardised(data: Any) -> None:
     assert (s_1 == 0).all()
     assert abs(s_2.mean()) < 1e-9 and abs(s_2.std(ddof=0) - 1) < 1e-9
     assert isinstance(frame, pd.DataFrame)
+
+
+def test_compute_trajectory_carries_interval_bounds(data: Any) -> None:
+    def predict(payload: dict[str, Any]) -> ApiResult:
+        n = len(payload["records"])
+        body = {"predicted_rul": 100.0 - n, "health_status": "healthy"}
+        body |= {"rul_lower": 90.0 - n, "rul_upper": 110.0 - n, "interval_level": 0.8}
+        return ApiResult(True, 200, body)
+
+    frame = compute_trajectory(engine_history(data, "train", 2), predict, 30, 125, 5)
+    band = interval_band(frame)
+    assert band is not None and list(band.columns) == ["cycle", "rul_lower", "rul_upper"]
+    assert band["rul_lower"].tolist() == [60.0, 55.0, 50.0, 45.0]
+    assert (band["rul_lower"] <= frame["predicted_rul"]).all()
+
+
+def test_interval_band_partial_and_missing_columns() -> None:
+    frame = pd.DataFrame(
+        {"cycle": [30, 35], "rul_lower": [1.0, float("nan")], "rul_upper": [5.0, float("nan")]}
+    )
+    assert interval_band(frame)["cycle"].tolist() == [30]
+    assert interval_band(pd.DataFrame({"cycle": [30]})) is None
+
+
+def test_interval_text_handles_nulls() -> None:
+    body = {"rul_lower": 4.84, "rul_upper": 18.76, "interval_level": 0.8}
+    assert interval_text(body) == "80% interval: 4.8 – 18.8 cycles"
+    assert interval_text({"rul_lower": None, "rul_upper": None, "interval_level": None}) is None
+    assert interval_text({}) is None
+    assert interval_text({"rul_lower": 1.0, "rul_upper": 2.0}) == "Interval: 1.0 – 2.0 cycles"

@@ -109,23 +109,49 @@ def compute_trajectory(
 ) -> pd.DataFrame:
     """Call ``predict`` (an ``ApiClient.predict``) every ``step`` cycles.
 
-    Returns columns ``cycle, predicted_rul, health_status, true_rul, true_rul_capped``.
+    Returns columns ``cycle, predicted_rul, health_status, rul_lower, rul_upper, true_rul,
+    true_rul_capped`` (interval bounds are NaN when the API serves no intervals).
 
     Raises:
         TrajectoryError: on the first failed call (so callers never cache partial results).
     """
     cycles = trajectory_cycles(history.last_cycle, window, step)
-    predicted, status = [], []
+    predicted, status, lower, upper = [], [], [], []
     for n in cycles:
         result = predict(engine_payload(history, n))
         if not result.ok:
             raise TrajectoryError(n, result.body)
         predicted.append(float(result.body["predicted_rul"]))
         status.append(result.body["health_status"])
+        lower.append(_as_float(result.body.get("rul_lower")))
+        upper.append(_as_float(result.body.get("rul_upper")))
     out = true_rul_series(history, cycles, rul_cap)
     out.insert(1, "predicted_rul", predicted)
     out.insert(2, "health_status", status)
+    out.insert(3, "rul_lower", lower)
+    out.insert(4, "rul_upper", upper)
     return out
+
+
+def _as_float(value: Any) -> float:
+    return float("nan") if value is None else float(value)
+
+
+def interval_band(frame: pd.DataFrame) -> pd.DataFrame | None:
+    """Rows of a trajectory with both interval bounds, for the shaded band; ``None`` if none."""
+    if not {"rul_lower", "rul_upper"} <= set(frame.columns):
+        return None
+    band = frame[["cycle", "rul_lower", "rul_upper"]].dropna()
+    return None if band.empty else band.reset_index(drop=True)
+
+
+def interval_text(body: Mapping[str, Any]) -> str | None:
+    """``"80 % interval: 98.4 – 125.0 cycles"`` for a /predict body, or ``None`` without bounds."""
+    lower, upper, level = body.get("rul_lower"), body.get("rul_upper"), body.get("interval_level")
+    if lower is None or upper is None:
+        return None
+    label = f"{level:.0%} interval" if level is not None else "Interval"
+    return f"{label}: {lower:.1f} – {upper:.1f} cycles"
 
 
 def sensor_chart_frame(history: EngineHistory, sensors: list[str]) -> pd.DataFrame:

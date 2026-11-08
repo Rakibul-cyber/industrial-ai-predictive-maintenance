@@ -9,12 +9,20 @@ from pathlib import Path
 import pytest
 import sklearn
 
-from predmaint.models.predict import clear_model_cache, load_model, predict_rul
+from predmaint.models.predict import (
+    clear_model_cache,
+    interval_mismatch,
+    load_interval_model,
+    load_model,
+    predict_rul,
+)
 from predmaint.models.registry import pipeline_feature_names
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = ROOT / "models" / "model.joblib"
 METADATA = ROOT / "models" / "model_metadata.json"
+INTERVALS = ROOT / "models" / "model_intervals.joblib"
+INTERVALS_METADATA = ROOT / "models" / "model_intervals_metadata.json"
 EXAMPLES = ROOT / "examples"
 
 
@@ -49,7 +57,19 @@ def test_committed_artifact_reproduces_sidecar(example: str) -> None:
     model = load_model(MODEL)
     expected = json.loads((EXAMPLES / "expected_predictions.json").read_text())[example]
     payload = json.loads((EXAMPLES / example).read_text())
-    result = predict_rul(payload["records"], model)
+    result = predict_rul(payload["records"], model, load_interval_model(INTERVALS))
     assert round(result.predicted_rul, 2) == expected["predicted_rul"]
+    assert round(result.rul_lower, 2) == expected["rul_lower"]
+    assert round(result.rul_upper, 2) == expected["rul_upper"]
+    assert result.interval_level == expected["interval_level"]
     assert result.health_status == expected["health_status"]
     assert result.model_version == expected["model_version"]
+
+
+def test_committed_interval_artifact_matches_served_model() -> None:
+    """ADR-034: the committed interval artifact belongs to the committed point model."""
+    assert INTERVALS.is_file() and INTERVALS_METADATA.is_file()
+    clear_model_cache()
+    model, intervals = load_model(MODEL), load_interval_model(INTERVALS)
+    assert interval_mismatch(intervals, model) is None
+    assert intervals.metadata["library_versions"]["scikit-learn"] == sklearn.__version__

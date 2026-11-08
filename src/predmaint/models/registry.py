@@ -62,6 +62,16 @@ def make_primary(columns: Sequence[str], seed: int, params: Mapping[str, Any]) -
     return Pipeline([("select", _select(columns)), ("model", model)])
 
 
+def make_quantile_model(
+    columns: Sequence[str], seed: int, params: Mapping[str, Any], quantile: float
+) -> Pipeline:
+    """ADR-034: same pipeline as the primary model, with ``loss="quantile"`` at ``quantile``."""
+    model = HistGradientBoostingRegressor(
+        loss="quantile", quantile=quantile, early_stopping=False, random_state=seed, **params
+    )
+    return Pipeline([("select", _select(columns)), ("model", model)])
+
+
 def make_model(
     name: str, columns: Sequence[str], seed: int, params: Mapping[str, Any] | None = None
 ) -> Pipeline:

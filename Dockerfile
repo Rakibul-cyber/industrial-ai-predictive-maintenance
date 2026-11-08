@@ -25,12 +25,14 @@ RUN pip install --only-binary=:all: -r requirements.txt \
     && useradd --uid 1000 --gid app --no-create-home --shell /usr/sbin/nologin app \
     && mkdir -p /app/data && chown app:app /app/data
 
-# Application code, CLI scripts (dataset download), demo payloads, and the committed served model
-# (ADR-030). HOME=/tmp lets the dashboard run under an arbitrary host UID (APP_UID in compose).
+# Application code, CLI scripts (dataset download), demo payloads, the committed served model
+# (ADR-030) and its prediction-interval artifact (ADR-034).
+# HOME=/tmp lets the dashboard run under an arbitrary host UID (APP_UID in compose).
 COPY src/ src/
 COPY scripts/ scripts/
 COPY examples/ examples/
-COPY models/model.joblib models/model_metadata.json models/
+COPY models/model.joblib models/model_metadata.json \
+     models/model_intervals.joblib models/model_intervals_metadata.json models/
 
 USER app
 EXPOSE 8000 8501

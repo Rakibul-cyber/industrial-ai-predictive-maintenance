@@ -168,7 +168,10 @@ Metric numbers and `"…"` illustrate **shape only**; the real values are in §7
 ```
 load_model(model_dir: Path | None = None) -> LoadedModel     # default $MODEL_DIR; cached per directory
 clear_model_cache() -> None
-predict_rul(cycles: pd.DataFrame | Sequence[Mapping], model: LoadedModel) -> PredictionResult
+predict_rul(cycles: pd.DataFrame | Sequence[Mapping], model: LoadedModel,
+            intervals: IntervalModel | None = None) -> PredictionResult
+load_interval_model(path: Path | None = None) -> IntervalModel   # default: next to $MODEL_PATH (M8)
+order_bounds(point, lower, upper, rul_cap) -> (lower, upper, n_reordered)
 health_status(rul: float) -> Literal["critical", "warning", "healthy"]
 predict_from_features(pipeline, features, rul_cap) -> np.ndarray   # shared clamp, also used offline
 ```
@@ -178,8 +181,20 @@ predict_from_features(pipeline, features, rul_cap) -> np.ndarray   # shared clam
 - Checks, in order: ≥ `window_size` records (`InsufficientHistoryError`); `cycle` and required sensors present and non-null (`MissingColumnsError`, with `.columns`); values finite and cycles positive integers (`InvalidValuesError`); cycles strictly increasing by exactly 1 as given (`NonConsecutiveCyclesError` — covers out-of-order, duplicates, gaps). All except `ModelNotAvailableError` subclass `InputContractError(ValueError)`. HTTP mapping is in 06 §6.
 - Only the **last `window_size` records** are used. They pass through the shared `features.build.build_features` to produce one feature row; extra older history cannot change the result (tested).
 - `PredictionResult`: `predicted_rul` (float, clamped to `[0, rul_cap]`, ADR-027), `health_status` (ADR-025), `cycles_received`, `cycles_used` (= `window_size`), `last_cycle`, `model_version`, `warnings` (`OUT_OF_TRAINING_RANGE` messages for required sensors in the used window).
+- **Intervals (M8, ADR-034):** with a matching `IntervalModel` (`for_model_version` == served `model_version` and identical `feature_names`), `PredictionResult` also carries `rul_lower`, `rul_upper` (clamped to [0, `rul_cap`], ordered around the point) and `interval_level` (0.8). Without one, or on a mismatch (logged warning), these are `None`. The point prediction is byte-identical in all cases (tested).
 - Health status (ADR-025, `config.HEALTH_BANDS`): `critical` if RUL < 20; `warning` if 20 ≤ RUL < 60; `healthy` if RUL ≥ 60.
 - The offline test evaluation and `predict_rul` produce bit-identical predictions (contract test; real-data test recomputes the served model's test RMSE through `predict_rul`).
+
+### 10a. Prediction intervals (M8, ADR-034) — measured 2026-11-08T18:55:47Z
+
+Two `HistGradientBoostingRegressor(loss="quantile")` models (q = 0.1, 0.9 → nominal 80 %) with the served model's features, train-row filter, seed and hyperparameters (`learning_rate=0.05, max_iter=200, max_leaf_nodes=15, l2_regularization=0.0`), trained by `scripts/train.py --model intervals` after `--select`, on code commit `8d893ff` plus the uncommitted M8 working tree. There is no search, and the point model is untouched (SHA-256 unchanged).
+
+| | Coverage (unclipped) | Coverage (clipped) | Mean width | Reordered |
+|---|---|---|---|---|
+| 5-fold GroupKFold out-of-fold (17,731 rows) | 0.509 | 0.737 | 37.2 | 1,023 |
+| Official test, last cycle (100 engines) | 0.740 | 0.820 | 42.1 | 8 |
+
+Coverage for true RUL > 125 is 0 against unclipped truth by construction (cap); bucket tables and interpretation in [16 §9](16_EVALUATION_REPORT.md). Source: `reports/metrics_intervals.json`.
 
 ## 11. Limitations
 
@@ -188,5 +203,5 @@ predict_from_features(pipeline, features, rul_cap) -> np.ndarray   # shared clam
 - Predictions are clamped to `rul_cap` (125); true test RULs up to 145 are under-predicted by design.
 - The primary configuration was chosen by CV on the training set only, and selection is by CV, so the official test set stays a held-out report. The 12-configuration search still slightly favours the primary's CV estimate (best-of-12); its test RMSE (16.610) is close to its CV RMSE (16.559).
 - Rolling features need ≥ 30 cycles of history; younger engines cannot be scored.
-- No uncertainty estimate; health bands are illustrative thresholds, not engineering limits.
+- Uncertainty: the M8 80 % intervals are below nominal coverage out-of-fold and cannot cover true RUL > 125; health bands are illustrative thresholds, not engineering limits.
 - joblib artifacts are tied to the scikit-learn version (mismatch warning, 02 §7).

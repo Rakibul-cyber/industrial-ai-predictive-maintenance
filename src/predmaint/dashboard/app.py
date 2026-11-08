@@ -20,6 +20,8 @@ from predmaint.dashboard.helpers import (
     compute_trajectory,
     engine_history,
     engine_payload,
+    interval_band,
+    interval_text,
     sensor_chart_frame,
     units,
 )
@@ -123,6 +125,9 @@ with explorer:
             result = client.predict(engine_payload(history, n))
             if result.ok:
                 left.metric("Predicted RUL (cycles)", f"{result.body['predicted_rul']:.1f}")
+                band_text = interval_text(result.body)
+                if band_text:
+                    left.caption(band_text)
                 with mid:
                     st.caption("Health status")
                     status_badge(result.body["health_status"])
@@ -194,10 +199,27 @@ with trajectory_tab:
                         "band": ["critical below", "warning below"],
                     }
                 )
+                band = interval_band(frame)
+                band_layers = (
+                    [
+                        {
+                            "data": {"values": band.to_dict("records")},
+                            "mark": {"type": "area", "opacity": 0.2},
+                            "encoding": {
+                                "x": {"field": "cycle", "type": "quantitative"},
+                                "y": {"field": "rul_lower", "type": "quantitative"},
+                                "y2": {"field": "rul_upper"},
+                            },
+                        }
+                    ]
+                    if band is not None
+                    else []
+                )
                 st.vega_lite_chart(
                     long,
                     {
                         "layer": [
+                            *band_layers,
                             {
                                 "mark": {"type": "line", "point": True},
                                 "encoding": {
@@ -218,7 +240,8 @@ with trajectory_tab:
                     width="stretch",
                 )
                 st.caption(
-                    f"true_rul_capped = min(true RUL, {RUL_CAP}), the training target. Dashed: "
+                    ("Shaded: 80 % prediction interval. " if band is not None else "")
+                    + f"true_rul_capped = min(true RUL, {RUL_CAP}), the training target. Dashed: "
                     f"health bands (critical < {bands['critical_below']}, "
                     f"warning < {bands['warning_below']})."
                 )
@@ -274,6 +297,31 @@ with model_tab:
                 }
             )
         )
+        intervals = info.body.get("intervals")
+        if intervals:
+            st.subheader("Prediction intervals")
+            st.table(
+                pd.DataFrame(
+                    {
+                        "Coverage (unclipped truth)": [
+                            f"{intervals[k]['coverage_unclipped']:.3f}" for k in ("cv_oof", "test")
+                        ],
+                        "Coverage (clipped truth)": [
+                            f"{intervals[k]['coverage_clipped']:.3f}" for k in ("cv_oof", "test")
+                        ],
+                        "Mean width": [
+                            f"{intervals[k]['mean_width']:.1f}" for k in ("cv_oof", "test")
+                        ],
+                    },
+                    index=["CV out-of-fold", "Official test"],
+                )
+            )
+            st.caption(
+                f"Nominal {intervals['interval_level']:.0%} interval (quantiles "
+                f"{intervals['quantiles']}) for model {intervals['for_model_version']}."
+            )
+        else:
+            st.caption("No prediction-interval artifact loaded; point predictions only.")
         st.subheader("Metrics")
         st.table(
             pd.DataFrame(

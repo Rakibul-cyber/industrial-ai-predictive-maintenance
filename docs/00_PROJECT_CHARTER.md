@@ -62,6 +62,8 @@ These are candidate extensions only after Milestone 7 and only via [15](15_CHANG
 | D6 | Dockerfile + docker-compose; CI workflow (CI delivered in M1) | M6 / M1 |
 | D7 | Final README and docs matching code | M7 |
 
+**Post-MVP extension (Milestone 8, CR-008 / ADR-034):** prediction intervals (nominal 80 %, quantile gradient boosting) on `/predict`, in the dashboard and in the evaluation report. This moves out of the extensions list into implemented scope; the other extensions remain NOT IMPLEMENTED.
+
 ## 8. Success criteria
 
 - Official FD001 test-set MAE and RMSE are **measured and reported from actual runs** for both models (no target value is promised in advance; see [12](12_RISK_REGISTER.md) R4).

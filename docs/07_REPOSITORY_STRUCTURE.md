@@ -31,6 +31,7 @@ industrial-ai-predictive-maintenance/
 │   │   ├── train.py               #   CV, final fit, test evaluation, report (M2); selection (M3)
 │   │   ├── artifacts.py           #   save/load joblib + metadata JSON
 │   │   ├── selection.py           #   ADR-024 selection + promotion to model.joblib, comparison reports (M3)
+│   │   ├── intervals.py           #   q0.1/q0.9 interval models: training + coverage evaluation (M8, ADR-034)
 │   │   └── predict.py             #   inference contract: load_model, predict_rul, health_status, errors
 │   ├── api/                       # HTTP serving layer
 │   │   ├── main.py                #   create_app(), lifespan model loading, routes, request logging; `python -m predmaint.api.main`
@@ -62,7 +63,8 @@ industrial-ai-predictive-maintenance/
 │   ├── test_dashboard_client.py   #   M5: api_client + import boundary
 │   ├── test_dashboard_helpers.py  #   M5: true RUL, payloads, trajectory
 │   ├── test_dashboard_app.py      #   M5: streamlit AppTest smoke tests (API mocked)
-│   ├── test_model_artifact.py     #   M6: committed model present, sklearn pinned, reproduces sidecar
+│   ├── test_model_artifact.py     #   M6: committed model present, sklearn pinned, reproduces sidecar (+ intervals, M8)
+│   ├── test_intervals.py          #   M8: interval training, ordering invariants, inference with/without/mismatch
 │   └── test_docker_smoke.py       #   M6 (marker: docker): runs scripts/smoke_test.sh
 ├── data/                          # gitignored except .gitkeep
 │   ├── .gitkeep
@@ -74,7 +76,9 @@ industrial-ai-predictive-maintenance/
 │   ├── baseline_metadata.json     #   per-candidate metadata, gitignored (reports/ holds the committed record)
 │   ├── primary.joblib             #   per-candidate artifact (M3), gitignored (+ primary_metadata.json)
 │   ├── model.joblib               #   served (selected) model — committed (ADR-030)
-│   └── model_metadata.json        #   served model metadata — committed with it
+│   ├── model_metadata.json        #   served model metadata — committed with it
+│   ├── model_intervals.joblib     #   q0.1/q0.9 interval pipelines for the served model — committed (M8)
+│   └── model_intervals_metadata.json #  for_model_version, quantiles, coverage evaluation — committed (M8)
 ├── examples/                      # committed demo payloads (ADR-029: FD001 test engines 1 and 34)
 │   ├── predict_request.json       #   all 31 cycles
 │   ├── predict_request_min.json   #   last 30 cycles (= WINDOW_SIZE)
@@ -85,6 +89,7 @@ industrial-ai-predictive-maintenance/
 │   ├── metrics_primary.json       #   written by scripts/train.py --model primary (M3)
 │   ├── model_comparison.json      #   written by scripts/train.py --select (M3)
 │   ├── model_comparison.md        #   human-readable comparison + selection statement (M3)
+│   ├── metrics_intervals.json     #   interval coverage/width, CV out-of-fold + test (M8)
 │   └── residuals_by_rul_bucket.json #  served-model test residuals by true-RUL bucket (M7)
 ├── LICENSE                        # MIT (code only; the NASA dataset is not covered) (M7)
 └── docs/                          # 00–17: planning, design, decisions, status, evaluation report (16), portfolio notes (17)

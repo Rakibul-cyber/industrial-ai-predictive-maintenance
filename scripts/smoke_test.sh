@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
-# Docker smoke test (docs/09, M6): build the image, start compose, wait for both healthchecks,
-# check /health, POST the late-life example and assert its recorded critical result, check the
+# Docker smoke test (docs/09, M6/M8): build the image, start compose, wait for both healthchecks,
+# check /health (model + intervals loaded), POST the late-life example and assert its recorded
+# critical result and rul_lower <= predicted_rul <= rul_upper (ADR-034), check the
 # dashboard health endpoint, tear down. Exits non-zero on any failure.
 #
-# Usage: bash scripts/smoke_test.sh   (needs docker compose, curl, python3; ports 8000/8501 free)
+# Usage: bash scripts/smoke_test.sh   (needs docker compose, curl, python3)
+# Runs on its own host ports (default 18000/18501), so a running demo stack is not disturbed.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 PROJECT="${SMOKE_PROJECT:-predmaint-smoke}"
 TIMEOUT_S="${SMOKE_TIMEOUT_S:-240}"
+export API_HOST_PORT="${SMOKE_API_PORT:-18000}" DASHBOARD_HOST_PORT="${SMOKE_DASHBOARD_PORT:-18501}"
+API="http://127.0.0.1:${API_HOST_PORT}"
+DASH="http://127.0.0.1:${DASHBOARD_HOST_PORT}"
 # The dashboard writes FD001 into the ./data bind mount; on Linux it must run as the host user.
 export APP_UID="${APP_UID:-$(id -u)}" APP_GID="${APP_GID:-$(id -g)}"
 compose() { docker compose -p "$PROJECT" "$@"; }
@@ -41,13 +46,15 @@ while true; do
 done
 
 echo "== GET /health"
-health=$(curl -fsS http://127.0.0.1:8000/health) || fail "/health request failed"
+health=$(curl -fsS "$API/health") || fail "/health request failed"
 echo "   $health"
 python3 -c 'import json,sys; b=json.loads(sys.argv[1]); assert b["model_loaded"] is True, b' "$health" \
   || fail "/health does not report model_loaded=true"
+python3 -c 'import json,sys; b=json.loads(sys.argv[1]); assert b["intervals_loaded"] is True, b' \
+  "$health" || fail "/health does not report intervals_loaded=true"
 
 echo "== POST /predict examples/predict_request_late.json"
-result=$(curl -fsS -X POST http://127.0.0.1:8000/predict -H 'Content-Type: application/json' \
+result=$(curl -fsS -X POST "$API/predict" -H 'Content-Type: application/json' \
   -d @examples/predict_request_late.json) || fail "/predict request failed"
 echo "   $result"
 python3 - "$result" <<'PY' || fail "/predict result does not match examples/expected_predictions.json"
@@ -55,12 +62,14 @@ import json, sys
 got = json.loads(sys.argv[1])
 expected = json.load(open("examples/expected_predictions.json"))["predict_request_late.json"]
 assert got["health_status"] == "critical", got
-for key in ("predicted_rul", "health_status", "cycles_received", "last_cycle", "model_version"):
+assert got["rul_lower"] <= got["predicted_rul"] <= got["rul_upper"], got
+keys = ("predicted_rul", "health_status", "cycles_received", "last_cycle", "model_version")
+for key in (*keys, "rul_lower", "rul_upper", "interval_level"):
     assert got[key] == expected[key], (key, got[key], expected[key])
 PY
 
 echo "== GET dashboard /_stcore/health"
-dash_health=$(curl -fsS http://127.0.0.1:8501/_stcore/health) || fail "dashboard health request failed"
+dash_health=$(curl -fsS "$DASH/_stcore/health") || fail "dashboard health request failed"
 [[ "$dash_health" == ok ]] || fail "dashboard health returned '${dash_health}'"
 echo "   ${dash_health}"
 

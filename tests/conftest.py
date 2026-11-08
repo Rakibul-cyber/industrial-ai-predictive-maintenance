@@ -90,13 +90,38 @@ def synthetic_training_dir(tmp_path: Path) -> Path:
     return directory
 
 
+def _serve_primary(models: Path) -> None:
+    """Promote the primary candidate the way ``selection.promote`` writes the served files."""
+    import json
+    import shutil
+
+    from predmaint.config import HEALTH_BANDS
+    from predmaint.models.selection import served_model_version
+
+    meta = json.loads((models / "primary_metadata.json").read_text())
+    shutil.copyfile(models / "primary.joblib", models / "model.joblib")
+    promoted = {
+        **meta,
+        "model_version": served_model_version(meta),
+        "candidate_model_version": meta["model_version"],
+        "selected_by": "cv_rmse",
+        "promoted_at": meta["trained_at"],
+        "health_bands": dict(HEALTH_BANDS),
+        "comparison": {"selected": "primary", "note": "forced by the test fixture"},
+    }
+    (models / "model_metadata.json").write_text(json.dumps(promoted, indent=2))
+
+
 @pytest.fixture(scope="session")
 def served_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Train both candidates on synthetic data and promote one: a real served artifact.
+    """Train both candidates on synthetic data, serve the primary, and train its intervals.
+
+    On this tiny synthetic data Ridge usually wins CV, but intervals require a served HGB
+    (ADR-034), so the primary is promoted explicitly, exactly as ``promote`` would write it.
 
     The returned directory holds ``models/`` (incl. ``model.joblib``) and ``CMAPSSData/``.
     """
-    from predmaint.models.selection import promote
+    from predmaint.models.intervals import run_interval_training
     from predmaint.models.train import run_training
 
     root = tmp_path_factory.mktemp("served")
@@ -123,7 +148,15 @@ def served_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
             search_grid=tiny_grid,
             echo=lambda _msg: None,
         )
-    promote(root / "models", root / "reports", echo=lambda _msg: None)
+    _serve_primary(root / "models")
+    run_interval_training(
+        data_dir,
+        root / "models",
+        root / "reports",
+        verify_checksums=False,
+        expected=None,
+        echo=lambda _msg: None,
+    )
     return root
 
 

@@ -5,7 +5,7 @@ Talking points grounded in the implemented system. Numbers come from `reports/*.
 ## CV entry (3–4 lines)
 
 **Industrial AI — Predictive Maintenance Platform** (Python, scikit-learn, FastAPI, Streamlit, Docker, GitHub Actions).
-End-to-end remaining-useful-life prediction on NASA C-MAPSS FD001: checksummed data pipeline, leakage-safe rolling features, engine-grouped CV, and a HistGradientBoosting model selected on CV over a Ridge baseline (test RMSE 16.61 vs 19.14 cycles).
+End-to-end remaining-useful-life prediction on NASA C-MAPSS FD001: checksummed data pipeline, leakage-safe rolling features, engine-grouped CV, and a HistGradientBoosting model selected on CV over a Ridge baseline (test RMSE 16.61 vs 19.14 cycles), plus quantile-regression prediction intervals with honestly reported coverage.
 Served via a validated FastAPI service (p95 13.6 ms) and a Streamlit dashboard; Docker Compose with readiness healthchecks; 187 tests, 95 % coverage, CI with a Docker smoke test on amd64.
 
 ## 60-second summary
@@ -57,6 +57,9 @@ Test RMSE 16.6 and MAE 12.6 cycles. That's solid for a simple tabular approach, 
 **10. Why commit a binary model to git?**
 It is 451 KB and makes a fresh clone runnable with `docker compose up` alone. The risks (pickle portability, review) are mitigated by the scikit-learn pin, a version-check test, a test that the committed model reproduces the recorded demo predictions, and a retraining procedure that reproduces it byte-for-byte.
 
+**11. Why quantile regression for the intervals, and what does the RUL cap do to coverage?** (M8)
+Two extra HistGradientBoosting models with quantile loss (q = 0.1 and 0.9) reuse the exact pipeline and hyperparameters of the served model. That means no new dependency and no search, and the widths depend on the input. The point model is untouched, and the API falls back to null bounds if the artifact doesn't match it. The cap is the honest catch: the quantile models learn capped labels and the bounds are clamped at 125, so an engine whose true RUL is above 125 can never be covered. Against unclipped truth, out-of-fold coverage is 0.509 overall and 0 in the > 125 bucket. Against the capped target it's 0.737, still below the nominal 0.80. I reported that rather than tuning toward 80 %; conformal calibration on out-of-fold residuals would be my next step.
+
 ## Strongest points
 
 - An honest evaluation protocol: grouped CV, test used only for reporting, residuals analysed by RUL range, limitations stated.
@@ -67,7 +70,7 @@ It is 451 KB and makes a fresh clone runnable with `docker compose up` alone. Th
 
 ## Weakest points
 
-- Modest model accuracy and no uncertainty quantification; optimistic bias in the 21–60 cycle range.
+- Modest model accuracy; the 80 % intervals (M8) are under-covering and cannot cover true RUL > 125; optimistic bias in the 21–60 cycle range.
 - Single subset (FD001) on simulated data.
 - The cap hides long-RUL engines (the engine 1 demo sits at 125).
 - One 1.1 GB image serves both roles; the API carries Streamlit's dependencies.
