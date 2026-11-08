@@ -67,7 +67,7 @@ industrial-ai-predictive-maintenance/
 ├── data/                          # gitignored except .gitkeep
 │   ├── .gitkeep
 │   ├── raw/                       #   downloaded archive + extracted CMAPSSData/
-│   └── processed/                 #   reserved; unused in MVP
+│   └── processed/                 #   reserved; unused in MVP (not created)
 ├── models/                        # artifacts
 │   ├── .gitkeep
 │   ├── baseline.joblib            #   per-candidate artifact (M2), gitignored
@@ -84,8 +84,11 @@ industrial-ai-predictive-maintenance/
 │   ├── metrics_baseline.json      #   written by scripts/train.py --model baseline (M2)
 │   ├── metrics_primary.json       #   written by scripts/train.py --model primary (M3)
 │   ├── model_comparison.json      #   written by scripts/train.py --select (M3)
-│   └── model_comparison.md        #   human-readable comparison + selection statement (M3)
-└── docs/                          # 00–15 planning and design documents
+│   ├── model_comparison.md        #   human-readable comparison + selection statement (M3)
+│   └── residuals_by_rul_bucket.json #  served-model test residuals by true-RUL bucket (M7)
+├── LICENSE                        # MIT (code only; the NASA dataset is not covered) (M7)
+└── docs/                          # 00–17: planning, design, decisions, status, evaluation report (16), portfolio notes (17)
+    └── img/                       #   dashboard screenshots added by the owner (README references four PNGs)
 ```
 
 Rules: no notebooks as source of truth; no logic in `scripts/`; `dashboard/` depends only on `requests`, `pandas`, `numpy`, `streamlit`, `predmaint.config` and `predmaint.data.load` (tested).

@@ -64,6 +64,21 @@ FD001 only. No anomaly detection, other subsets, deep learning, hyperparameter s
 - Never modify, delete, or reformat files unrelated to the authorized milestone.
 - Never commit `data/` contents or `*.joblib` artifacts.
 
+## Project state: MVP COMPLETE (2026-11-08)
+
+All milestones M0–M7 are complete (docs/08, docs/14). The MVP is frozen: **any further work, including fixes, goes through change control (docs/15)** and needs explicit user authorization as a new milestone.
+
+Candidate next milestones (**NOT authorized**; details in docs/16 §8):
+
+- FD002–FD004 support (per-regime normalisation, regime-aware features)
+- Prediction intervals (quantile boosting or conformal prediction)
+- Bias correction for the 21–60-cycle range (optimistic predictions)
+- Anomaly detection model and endpoint
+- Sequence models (LSTM/CNN/Transformer) under the same CV protocol
+- Input-drift monitoring and a retraining trigger
+- Smoke-test assertion that the dashboard's FD001 download succeeded (Linux bind-mount write path)
+- Cloud deployment (out of the MVP's scope)
+
 ## Change control
 
 Any deviation from an approved decision or contract follows docs/15 (change record with evidence, superseding ADR, approval). Approved decisions are never reversed silently.

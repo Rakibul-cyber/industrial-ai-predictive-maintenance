@@ -1,6 +1,6 @@
 # 08 — Implementation Plan
 
-Milestone 0 (planning, this document set) is complete and approved (architecture frozen 2026-11-08). Milestones run strictly in order; each starts only after explicit user authorization (CLAUDE.md).
+**All milestones M0–M7 are COMPLETE (MVP, 2026-11-08).** Milestone 0 (planning) was approved with the architecture freeze on 2026-11-08. Milestones run strictly in order; each starts only after explicit user authorization (CLAUDE.md).
 
 **Critical path:** M1 → M2 → M3 → M4 → M5 → M6 → M7 (fully sequential: features need data, training needs features, API needs the artifact, dashboard needs the API, compose needs both services, final docs need everything). Total estimate ≈ 22 h.
 
@@ -45,7 +45,7 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
   ```
 
 - **Acceptance criteria:** checksums match 04 §3; all tests pass (real-data test executed, not skipped, locally); ruff clean; `pip check` clean; licence outcome recorded; CI workflow file present (CI run result recorded in 14 once a push is authorized).
-- **Estimated effort:** 4 h · **Status:** Complete 2026-11-08 (awaiting user review; uncommitted). Evidence in 14. CI run itself pending an authorized push (U5).
+- **Estimated effort:** 4 h · **Status:** **COMPLETE** (2026-11-08; committed and pushed, CI green; evidence in 14).
 
 ## M2 — Labels, features, baseline training and evaluation (re-scoped by CR-002)
 
@@ -70,7 +70,7 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
   ```
 
 - **Acceptance criteria:** all tests pass (real-data tests executed locally); sensor table recorded in 04 from real data; feature count = 1 + 3 × len(kept sensors); baseline CV and official-test MAE/RMSE/NASA score from an actual run recorded in 05 §7a and 14; `reports/metrics_baseline.json` written.
-- **Estimated effort:** 5 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
+- **Estimated effort:** 5 h · **Status:** **COMPLETE** (2026-11-08; committed and pushed, CI green; evidence in 14).
 
 ## M3 — Primary model, selection, served artifact, inference contract (CR-003)
 
@@ -100,7 +100,7 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
   ```
 
 - **Acceptance criteria:** both candidates have CV and official-test MAE/RMSE/NASA from actual runs (05 §7a, 14); the served model follows ADR-024; a repeat primary run gives identical metrics; primary training < 5 min wall; `model.joblib` + `model_metadata.json` include `model_name`, `selected_by`, `model_version`, `comparison`; all tests pass, including real-data tests locally.
-- **Estimated effort:** 5 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
+- **Estimated effort:** 5 h · **Status:** **COMPLETE** (2026-11-08; committed and pushed, CI green; evidence in 14).
 
 ## M4 — FastAPI service (CR-004)
 
@@ -145,7 +145,7 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
   ```
 
 - **Acceptance criteria:** all 06 behaviours tested and passing; curl outputs recorded in 14 and copied into 06; p95 < 200 ms recorded; committed examples reproduce their sidecar through the API.
-- **Estimated effort:** 3 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
+- **Estimated effort:** 3 h · **Status:** **COMPLETE** (2026-11-08; committed and pushed, CI green; evidence in 14).
 
 ## M5 — Streamlit dashboard (CR-005)
 
@@ -171,7 +171,7 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
   ```
 
 - **Acceptance criteria:** tests pass; the dashboard produced real `/predict` calls visible in the API log; displayed values recorded in 14; API-down and dataset-absent behaviour verified.
-- **Estimated effort:** 3 h · **Status:** Complete 2026-11-08 (uncommitted, awaiting review). Evidence in 14.
+- **Estimated effort:** 3 h · **Status:** **COMPLETE** (2026-11-08; committed and pushed, CI green; evidence in 14).
 
 ## M6 — Containerisation, test finalisation, CI docker job
 
@@ -202,26 +202,34 @@ Test gating (09 §3): tests marked `data` skip when FD001 files are absent; `net
   ```
 
 - **Acceptance criteria:** image builds; both services healthy; containerised predictions == sidecar; dashboard downloaded FD001 on first start and skipped on restart; smoke test passes (exit 0) and fails non-zero on error; coverage gate passes; outputs recorded in 14.
-- **Estimated effort:** 4 h · **Status:** Complete 2026-11-08 locally on arm64 (uncommitted, awaiting review); amd64 confirmation is pending the CI `docker` job after the user's push.
+- **Estimated effort:** 4 h · **Status:** **COMPLETE** (2026-11-08; committed and pushed, CI green; evidence in 14).
 
 ## M7 — Finalisation and release readiness
 
-- **Objective:** documentation matches code; full acceptance checklist passes.
-- **Dependencies:** M6.
-- **Requirements:** NFR-005, NFR-009 (and re-verification of all FR/NFR).
-- **Files to modify:** `README.md` (final), `docs/*` as needed for fidelity, `models/model_metadata.json` (final training run, ready to commit), `docs/11_ACCEPTANCE_CRITERIA.md` (ticked with evidence), `docs/14_PROJECT_STATUS.md`.
-- **Tasks:** clean-clone run of every README/08/10 command; coverage measurement; fill README results table from metadata; tick 11 with evidence; final consistency pass (same checks as M0 Step 4).
+- **Objective:** documentation matches the implementation; the acceptance checklist is closed; portfolio-ready README, evaluation report and notes.
+- **Dependencies:** M6 (committed `ccf68a7`, CI green incl. the `docker` job).
+- **Requirements:** NFR-005, NFR-009 (and final status of every FR/NFR).
+- **Files created:** `docs/16_EVALUATION_REPORT.md`, `docs/17_PORTFOLIO_NOTES.md`, `reports/residuals_by_rul_bucket.json`, `LICENSE`.
+- **Files modified:** `README.md` (final), `CLAUDE.md`, docs 01, 02, 06, 07, 08, 10, 11, 12, 14, 15.
+- **Tasks:**
+  - [x] M7-T1 Close UNVERIFIED items from the CI run 42509206610 (amd64 build, compose v2 on the runner; the Linux bind-mount write path is recorded as not asserted).
+  - [x] M7-T2 Fresh clone from GitHub, README Option A and Option B followed literally; one README defect found and fixed (CR-006), step re-run green.
+  - [x] M7-T3 Docs-vs-implementation audit of 02, 06, 07, 10 (table in 14); final status for all FR/NFR in 01; no ADR left Proposed.
+  - [x] M7-T4 Evaluation report generated from `reports/*.json`; residuals computed and saved.
+  - [x] M7-T5 Final README, MIT LICENSE.
+  - [x] M7-T6 Portfolio notes.
+  - [x] M7-T7 Close-out: CLAUDE.md, 11, 12, 14, 08; final defect review.
 - **Verification commands:**
 
   ```bash
-  git clone <repo> /tmp/clean && cd /tmp/clean   # then the full sequence in 10 §2
-  pytest -v --cov=predmaint --cov-report=term-missing   # ≥ 80 % excl. dashboard/app.py
+  git clone https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git /tmp/clean && cd /tmp/clean   # then README Option A and B
   ruff check . && ruff format --check .
+  pytest -q                                     # coverage gate 85 %
   grep -rnE "TBD|TODO|FIXME" README.md CLAUDE.md docs/ src/ | grep -v "grep -rnE" || echo "clean"
   ```
 
-- **Acceptance criteria:** every item in [11](11_ACCEPTANCE_CRITERIA.md) checked with evidence.
-- **Estimated effort:** 2 h · **Status:** Not started.
+- **Acceptance criteria:** every item in [11](11_ACCEPTANCE_CRITERIA.md) ticked with evidence or explicitly marked Not met with a reason.
+- **Estimated effort:** 2 h · **Status:** **COMPLETE** (2026-11-08; uncommitted, awaiting the user's final commit).
 
 ## Requirement → milestone traceability
 

@@ -19,3 +19,23 @@ Likelihood (L) / Impact (I): Low, Med, High. Reviewed at the end of every milest
 | R13 | **Scope creep** (anomaly detection, other subsets, deep learning, MLflow, cloud). | High | Med | Out-of-scope list (00 §6); CLAUDE.md milestone rules; 15 change control. | Defer to a post-M7 extension backlog. |
 | R14 | **Time overrun** vs ≈ 22 h estimate. | Med | Med | Small milestones with explicit acceptance; critical path tracked in 08. | Cut M5 polish (charts) before cutting tests or docs. |
 | R15 | **Unsafe artifact loading** (joblib = pickle). The served pickle is now committed (ADR-030). | Low | High | Loaded only from the configured local `MODEL_PATH`, which is baked into the image; never accept uploaded models (NFR-010); review model-file changes in PRs like code. | — |
+
+## Final status (M7, 2026-11-08)
+
+| ID | Final status | Evidence |
+|---|---|---|
+| R1 | Accepted (residual) | No licence stated by NASA; citation honoured; data downloaded by script; demo excerpt only (ADR-029). The S3 URL worked in every run, including the M7 fresh clone. |
+| R2 | Closed | Format, shapes and semantics verified (M0); locked by real-data tests. |
+| R3 | Closed | Leakage tests pass; CV ≈ test for both models (16 §2). |
+| R4 | Closed | The primary beats the baseline on CV and test (16 §2); model limits documented (16 §6–7). |
+| R5 | Accepted | ADR-009 convention documented; secondary metric only (16 §5). |
+| R6 | Mitigated | Pins + `tests/test_model_artifact.py`; fresh-clone retrain byte-identical. |
+| R7 | Closed | Contract tests API == offline; dashboard imports only the API client, config and data loader. |
+| R8 | Mitigated (residual) | Build/health/smoke pass on arm64 and amd64 (CI). Residual: the Linux bind-mount write path is not asserted by the smoke test. |
+| R9 | Closed | Base image pinned by digest. |
+| R10 | Closed | amd64 build + smoke test green in CI run 42509206610. |
+| R11 | Closed | CI green on every push; 0 annotations. |
+| R12 | Closed | Sensor rule verified on real data (04 §5a). |
+| R13 | Closed | Scope held to the MVP; extensions listed as NOT IMPLEMENTED (16 §8). |
+| R14 | Closed | MVP delivered (M0–M7). |
+| R15 | Mitigated | Model loaded only from the baked-in `MODEL_PATH`; no upload path. |

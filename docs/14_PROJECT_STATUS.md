@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Current milestone | **M6 — Docker, test finalisation, CI docker job: complete locally (arm64), awaiting review; amd64 pending the CI run** |
+| Current milestone | **MVP COMPLETE** — M0–M7 complete (2026-11-08). M7 work is uncommitted, awaiting the user's final commit. |
 | Last updated | 2026-11-08 |
-| Git ref | `main` = `origin/main` @ `6b4da81` "Add Streamlit dashboard for RUL API with API client and helpers" (M5, committed and pushed by the user; CI run 42506959482 green), on top of `7d7de29` (M4), `65db98d` (M3), `f4c86df` (M2), `4e8c04c` (M1), `71295ba` (M0). Working tree clean at the start of M6; M6 work is **uncommitted** for review (the user commits and pushes so CI runs the new `docker` job). |
-| Next approved action | **Await user review of M6**, the user's commit + push, and the first CI `docker` job result (amd64); then authorization for Milestone 7. |
+| Git ref | `main` = `origin/main` @ `ccf68a7` "feat: Finalize acceptance criteria, risk register, and decision log for M6; commit model artifact" (M6, includes the committed `models/model.joblib`). Final CI run [42509206610](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/runs/42509206610): **success** (`lint-test` + `docker`). |
+| Next approved action | The user reviews and makes the final commit of M7; adds the four screenshots under `docs/img/`. Any further work goes through change control (15) as a newly authorized milestone (candidates in CLAUDE.md). |
 
 ## Milestone tracker
 
@@ -17,8 +17,8 @@
 | M3 Primary model, selection, inference contract (CR-003) | **Accepted** 2026-11-08; committed `65db98d`, pushed; CI green (v7 actions, ubuntu-24.04) | M3 section below |
 | M4 API (CR-004) | **Accepted** 2026-11-08; committed `7d7de29`, pushed; CI green | M4 section below |
 | M5 Dashboard (CR-005) | **Accepted** 2026-11-08; committed `6b4da81`, pushed; CI green | M5 section below |
-| M6 Docker, tests, CI (ADR-030–032) | **Complete locally** 2026-11-08 (uncommitted); amd64 via CI pending | M6 section below |
-| M7 Finalisation | Not started | — |
+| M6 Docker, tests, CI (ADR-030–032) | **Accepted** 2026-11-08; committed `ccf68a7`, pushed; CI green incl. `docker` job (amd64) | M6 section below |
+| M7 Finalisation | **COMPLETE** 2026-11-08 (uncommitted, awaiting final commit) | M7 section below |
 
 ## M0 — what was verified (actual command results)
 
@@ -49,12 +49,12 @@
 | # | Item | Type | Tracked in |
 |---|---|---|---|
 | U1 | Dataset licence — **resolved in M1:** no licence stated on NASA PCoE or data.nasa.gov; PCoE requests acknowledgement + gives a dataset citation (04 §11). No redistribution. | Closed (accepted limitation) | 04 §11, 12 R1 |
-| U2 | Third-party mirror availability — **UNVERIFIED** (only needed if S3 fails) | Open | 12 R1 |
+| U2 | Third-party mirror availability — **UNVERIFIED** (only needed if S3 fails; S3 worked in every run incl. the M7 fresh clone) | Accepted limitation | 12 R1 |
 | U3 | Near-constant sensor list — **resolved in M2**: ≤ 2-unique rule verified on real data (04 §5a) | Closed | 04 §5a, 12 R12 |
-| U4 | NASA score official implementation — **UNVERIFIED** (interpretation fixed by ADR-009) | Open | 12 R5 |
+| U4 | NASA score official implementation — **UNVERIFIED** (interpretation fixed by ADR-009; secondary metric only) | Accepted limitation | 12 R5 |
 | U5 | GitHub Actions runner resolves Python 3.13 — **resolved**: run 42491244396 on `4e8c04c` succeeded, `actions/setup-python@v5` step with `python-version: "3.13"` passed. Exact patch version not visible (logs need auth). | Closed | CI section, 12 R11 |
 | U6 | Dockerfile/compose behaviour — **resolved in M6** on arm64 (build, healthy services, smoke test) | Closed | 08 M6, 12 R8 |
-| U7 | amd64 image build — **UNVERIFIED until the first CI `docker` job** after the user's push (wheels confirmed) | Open (pending push) | 12 R10 |
+| U7 | amd64 image build — **resolved in M7:** CI `docker` job green on `ubuntu-24.04` (x64), run 42509206610 | Closed | 12 R10 |
 | U8 | Column → physical sensor name mapping — **UNVERIFIED**, not used (ADR-020) | Accepted limitation | 12 R2 |
 
 ## M1 — results (2026-11-08, actual command output, trimmed)
@@ -338,6 +338,86 @@ $ pip check → No broken requirements found.   $ git ls-files data/ → data/.g
 - README now has the real CI badge (verified: badge URL → HTTP 200 `image/svg+xml`, title "CI - passing") and Quickstart Option A (Docker) / Option B (local Python). A stale README sentence ("data is not redistributed") was corrected to mention the ADR-029 excerpt.
 - 11: 16 criteria met, 3 partly met (AC-11 screenshot, AC-12 CI with the docker job, AC-22 fresh-clone run), 3 open for M7 (AC-04 README results table, AC-17 docs-match-code, AC-18 final defect review).
 
+## M7 — results (2026-11-08)
+
+### Step 1 — UNVERIFIED items, from CI run 42509206610 on `ccf68a7`
+
+Both jobs succeeded with 0 annotations: `lint-test` 18:17:00–18:17:50Z (incl. "Tests (coverage gate 85 %)"), `docker` 18:17:52–18:18:38Z ("Docker smoke test (build, compose up, healthchecks, /predict, teardown)").
+
+| Item | Outcome |
+|---|---|
+| amd64 image build | **Confirmed.** The `docker` job built and smoke-tested the image on GitHub's `ubuntu-24.04` hosted runner (x64). The script's arch line is not readable: job logs return HTTP 403 without authentication. |
+| `docker compose` v2 on the runner | **Confirmed.** `scripts/smoke_test.sh` calls `docker compose` under `set -euo pipefail` and the step succeeded. |
+| Linux bind-mount write path | **Not confirmed.** By design a failed FD001 download only logs a warning and the dashboard still becomes healthy (ADR-031), so a green smoke test does not prove the write worked, and the log line that would show it is not readable without authentication. Listed as a known gap; a smoke-test assertion is a candidate next milestone (CLAUDE.md). |
+
+### Step 2 — fresh clone from GitHub (temporary directory outside the repo, deleted afterwards)
+
+```text
+$ git clone https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git   → HEAD ccf68a7; models/ = model.joblib, model_metadata.json; data/ empty
+Option A (README, literally):
+$ export APP_UID=$(id -u) APP_GID=$(id -g); docker compose up -d --build → exit 0, "Image predmaint:latest Built", api Healthy
+$ docker compose ps
+api         Up 12 seconds (healthy)   127.0.0.1:8000->8000/tcp
+dashboard   Up 6 seconds (healthy)    127.0.0.1:8501->8501/tcp
+$ curl -s -X POST localhost:8000/predict … @examples/predict_request_late.json
+{"unit_id":"test-unit-34","predicted_rul":6.3,"health_status":"critical","cycles_received":203,"cycles_used":30,"last_cycle":203,"model_version":"primary-20261108-f4c86df","warnings":[]}
+dashboard log: "Downloaded, verified and extracted the archive." (clone's ./data owned by host UID 501)
+$ docker compose down → network removed
+Option B (README as it was, literally — incl. the three train.py commands):
+… train --model baseline: test MAE=15.347 RMSE=19.144 · --model primary: selected {lr 0.05, max_iter 200, leaves 15, l2 0}, CV RMSE 16.559 ± 0.695, test MAE=12.567 RMSE=16.610 · --select: primary
+retrained model.joblib is BYTE-IDENTICAL to the committed one
+$ pytest -q → 3 failed, 184 passed   ← README defect (CR-006): model_version changed to primary-20261108-ccf68a7, sidecar still f4c86df
+Fix: README Option B no longer retrains; optional "Retrain" block refreshes the sidecar (make_request_payload.py --expected ×3); doc 10 §6 likewise.
+Re-run (clone reset): corrected Option B → ruff clean; pytest -q → "Required test coverage of 85% reached. Total coverage: 94.98%", 187 passed, 2 skipped
+                      retrain + sidecar refresh → 187 passed, 2 skipped (only the 3 model_version strings changed)
+$ python -m predmaint.api.main; curl -s -X POST localhost:8000/predict … @examples/predict_request_min.json
+{"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":30,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[]}
+API stopped; 0 predmaint containers running; clone deleted.
+```
+
+### Step 3 — documentation vs implementation
+
+| Document | Compared against | Discrepancies found | Resolved |
+|---|---|---|---|
+| 02 Architecture | code modules, flows, compose | (1) diagram showed a read-only model volume (model is baked in since ADR-032); (2) §1 omitted `selection.py` and `smoke_test.sh`; (3) §4 described one training run, not three commands + 12-config search; (4) §5 said the service checks business rules and builds features from all records (it is `predict_rul`, last 30 records); (5) §7 omitted the pipeline's feature-select step; (6) §8 lacked the container download-failure path | All six fixed in the doc |
+| 06 API | live `/openapi.json`, `errors.py` | Endpoints, methods, all request/response fields match. Undocumented fallback error code `HTTP_ERROR` | Added to 06 §6 |
+| 07 Structure | `git ls-files` | Matches. `data/processed/` is listed but never created; M7 files missing | Marked "not created"; LICENSE, docs 16–17, `docs/img/`, residuals report added |
+| 10 Deployment | `docker compose config`, `Dockerfile` | Ports, user, restart, depends_on, volumes (ro/rw), healthcheck timings and env vars all match. §6 retraining lacked the sidecar refresh (CR-006); §9 amd64 pending | §6 fixed; §9 records the CI result |
+| README | fresh clone | Option B retrain caused failing tests (CR-006) | Fixed and re-verified |
+| 01 Requirements | tests/commands | Final status column added: 27/27 have a status — 26 Met, FR-015 Met as amended (CR-005), NFR-004 Met with a noted docstring gap | — |
+| 13 Decisions | — | 32 ADRs; none left Proposed (all Accepted or Superseded) | — |
+
+### Step 4–6 — deliverables
+
+`docs/16_EVALUATION_REPORT.md` (generated from `reports/*.json` and `models/model_metadata.json`), `reports/residuals_by_rul_bucket.json` (pandas one-off on the committed model; overall MAE 12.567 / RMSE 16.61 == metadata; buckets 0–20: MAE 3.43, signed +1.62; 21–60: 8.82, +5.38; 61–125: 14.60, +1.42; >125: 24.46, −24.46), final `README.md`, `LICENSE` (MIT, 2026, MD Rakibul Hassan), `docs/17_PORTFOLIO_NOTES.md`.
+
+### Final verification
+
+```text
+$ ruff check .            → All checks passed!
+$ ruff format --check .   → 66 files already formatted
+$ pytest -q               → Required test coverage of 85% reached. Total coverage: 94.98%
+                            187 passed, 2 skipped (network, docker opt-in) in 10.51s
+$ pytest -q -m data --no-cov → 11 passed   ·   pip check → No broken requirements found   ·   placeholder grep → clean
+```
+
+### Final defect review — no critical defects
+
+| # | Defect / rough edge | Severity | State |
+|---|---|---|---|
+| 1 | README Option B retrain broke artifact tests (CR-006) | Medium (docs) | Fixed in M7 |
+| 2 | `HTTP_ERROR` fallback code undocumented | Low (docs) | Fixed in M7 |
+| 3 | Smoke test does not assert that the FD001 download succeeded (Linux bind-mount write path unverified in CI) | Low | Open, candidate next milestone |
+| 4 | Screenshots missing (`docs/img/` absent); README image links broken until added | Low (docs) | Open, owner action |
+| 5 | 16 of 84 public functions lack docstrings (trivial properties, nested helpers, one-line wrappers) | Low | Accepted (no-refactor rule) |
+| 6 | No browser-level dashboard test; AppTest cannot read `st.badge` | Low | Accepted |
+| 7 | Optimistic bias (+5.4 cycles) for true RUL 21–60; cap saturation for RUL > 125 | Model limitation | Documented (16 §6–7) |
+| 8 | Image 1.1 GB; API image carries Streamlit/pyarrow | Low | Accepted (ADR-032) |
+| 9 | `.env` not auto-loaded in Option B | Low | Documented (10 §4) |
+| 10 | Primary training CPU cost on small machines unmeasured | Low | Documented (05 §7a) |
+
+**Blockers:** none.
+
 ## Measured results
 
 | Item | Value | Source |
@@ -358,3 +438,4 @@ $ pip check → No broken requirements found.   $ git ls-files data/ → data/.g
 | Docker image (arm64) | 1.1 GB on disk (`docker images`); 242,889,009 bytes content size; build 57 s cold | M6 |
 | Smoke test (arm64) | PASSED, exit 0; forced failure exit 1 | M6 |
 | Coverage (after M6) | 94.98 % (gate 85 %) | `pytest -q` |
+| **Final (M7)** | 187 passed, 2 skipped (opt-in); 11 real-data tests passed; coverage 94.98 % (gate 85 %); CI run 42509206610 green (lint-test + docker) | M7 |

@@ -1,24 +1,23 @@
 # Industrial AI — Predictive Maintenance Platform
 
+End-to-end remaining-useful-life (RUL) prediction for turbofan engines on NASA's C-MAPSS **FD001** benchmark: reproducible data acquisition, leakage-safe features, engine-grouped cross-validation, two models with a pre-registered selection rule, a FastAPI service, a Streamlit dashboard, Docker Compose and CI. On the official test set (100 engines, unclipped truth) the served **HistGradientBoosting** model reaches **RMSE 16.61 / MAE 12.57 cycles**, against **RMSE 19.14 / MAE 15.35** for the Ridge baseline. It was selected on 5-fold CV RMSE (16.56 vs 19.15), not on the test set.
+
 [![CI](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml/badge.svg)](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/workflows/ci.yml)
 
-Remaining Useful Life (RUL) prediction for turbofan engines on the NASA C-MAPSS **FD001** dataset, served through a FastAPI service and a Streamlit dashboard.
+## Screenshots
 
-**Status:** Milestones 1–6 implemented: data acquisition & validation, features, Ridge baseline and HistGradientBoosting primary model, CV-based selection, the inference contract, the FastAPI service, the Streamlit dashboard, Docker Compose and CI with a Docker smoke test. Measured results: [reports/model_comparison.md](reports/model_comparison.md). This README is finalised in Milestone 7.
-
-## What it does
-
-- Downloads the dataset reproducibly from NASA with checksum verification.
-- Trains a Ridge baseline and a HistGradientBoosting model with engine-grouped cross-validation, evaluates both on the official test set (MAE, RMSE, NASA score), and serves the one with the lower CV RMSE, with versioned metadata.
-- Serves predictions via `POST /predict` (plus `/health`, `/model/info`).
-- Shows predictions and sensor trends in a dashboard that gets every result from the API.
-- Runs both services with `docker compose up`. The served model is committed, so no training step is needed.
+![Engine explorer](docs/img/dashboard_explorer.png)
+![RUL trajectory](docs/img/dashboard_trajectory.png)
+![Upload](docs/img/dashboard_upload.png)
+![Model info](docs/img/dashboard_model_info.png)
 
 ## Quickstart
 
+Both options were verified from a fresh clone of this repository (Milestone 7).
+
 ### Option A: Docker (recommended)
 
-Requires Docker with Compose v2. The first start downloads FD001 (~12 MB) into `./data`; later starts work offline.
+Requires Docker with Compose v2. The served model is committed, so no training is needed. The first start downloads FD001 (~12 MB) into `./data`; later starts work offline.
 
 ```bash
 git clone https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance.git
@@ -30,74 +29,129 @@ curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @e
 docker compose down
 ```
 
-`bash scripts/smoke_test.sh` builds, starts, checks and tears down the stack in one go (it is what CI runs). Details: [docs/10_DEPLOYMENT_PLAN.md](docs/10_DEPLOYMENT_PLAN.md).
+`bash scripts/smoke_test.sh` builds, starts, checks and tears down the stack in one go; CI runs it on every push. Details: [docs/10_DEPLOYMENT_PLAN.md](docs/10_DEPLOYMENT_PLAN.md).
 
 ### Option B: local Python
 
-Requires Python 3.13 (`python3`) and network access to NASA's S3 bucket. The committed served model (`models/model.joblib`) works as-is; the three `train.py` commands reproduce it (they are needed only to retrain).
+Requires Python 3.13 (`python3`) and network access to NASA's S3 bucket.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt && pip install -e .
 python scripts/download_data.py      # downloads ~12 MB, verifies SHA-256, extracts to data/raw/CMAPSSData/
 python -m predmaint.data.validate    # checks the FD001 data contract (docs/04 §6)
-python scripts/train.py --model baseline   # Ridge: CV + official test metrics → models/, reports/
-python scripts/train.py --model primary    # HistGradientBoosting: 12-config CV search (~80 s on 8 cores) + test metrics
-python scripts/train.py --select           # promote the lower-CV-RMSE model → models/model.joblib, reports/model_comparison.md
 ruff check . && ruff format --check .
 pytest -q                            # includes the 85 % coverage gate; real-data tests run when data/raw/ is present
+python -m predmaint.api.main         # API on http://127.0.0.1:8000 (docs at /docs), serving the committed model
+streamlit run src/predmaint/dashboard/app.py --server.address localhost --server.port 8501   # second terminal
 ```
 
-## Run the API
-
-Uses the committed served model `models/model.joblib` (Option B environment). Configuration comes from environment variables (`MODEL_PATH`, `API_HOST`, `API_PORT`, `LOG_LEVEL`; see [.env.example](.env.example) and [docs/10_DEPLOYMENT_PLAN.md](docs/10_DEPLOYMENT_PLAN.md) §3).
+**Retrain (optional).** Reproduces the committed model (verified byte-identical from a fresh clone):
 
 ```bash
-python -m predmaint.api.main          # http://127.0.0.1:8000 — interactive docs at /docs
-curl -s localhost:8000/health
-curl -s localhost:8000/model/info
-curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request_min.json
-# → {"unit_id":"test-unit-1","predicted_rul":125.0,"health_status":"healthy","cycles_received":30,"cycles_used":30,"last_cycle":31,"model_version":"primary-20261108-f4c86df","warnings":[]}
+python scripts/train.py --model baseline   # Ridge: CV + official test metrics → models/, reports/
+python scripts/train.py --model primary    # HistGradientBoosting: 12-config CV search (~80 s on 8 cores)
+python scripts/train.py --select           # promote the lower-CV-RMSE model → models/model.joblib, model_metadata.json
+# the served model_version embeds the git SHA, so refresh the recorded demo expectations:
+python scripts/make_request_payload.py --unit 1 --out examples/predict_request.json --expected examples/expected_predictions.json
+python scripts/make_request_payload.py --unit 1 --last 30 --out examples/predict_request_min.json --expected examples/expected_predictions.json
+python scripts/make_request_payload.py --unit 34 --out examples/predict_request_late.json --expected examples/expected_predictions.json
+pytest -q
+```
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Offline["Offline: scripts/train.py"]
+    NASA[(NASA PCoE S3<br/>FD001 zip)] -->|download_data.py<br/>SHA-256 verified| RAW[data/raw]
+    RAW --> LOAD[load + validate<br/>data contract]
+    LOAD --> FEAT[features.build<br/>14 sensors × raw/mean/std<br/>30-cycle window]
+    FEAT --> CV[GroupKFold by engine<br/>Ridge · HGB 12-config search]
+    CV --> SEL{select by CV RMSE<br/>ADR-024}
+    SEL --> ART[(models/model.joblib<br/>+ metadata, committed)]
+  end
+  subgraph Runtime["Runtime: docker compose, one image"]
+    ART --> API[api · FastAPI :8000<br/>predict_rul uses the same features.build]
+    DASH[dashboard · Streamlit :8501] -->|HTTP JSON| API
+    NASA -.->|first start| DASH
+  end
+  USER((user)) --> DASH
+  CLIENT((curl / client)) --> API
+```
+
+The same `features.build` function produces the training rows and the single feature row the API builds from the last 30 cycles of a request. More detail: [docs/02_SYSTEM_ARCHITECTURE.md](docs/02_SYSTEM_ARCHITECTURE.md).
+
+## API example
+
+`examples/predict_request_late.json` holds FD001 test engine 34: all 203 cycles, true RUL 7.
+
+```bash
 curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d @examples/predict_request_late.json
-# → predicted_rul 6.3, health_status "critical" (true RUL 7)
 ```
 
-| Example | Engine | Cycles sent | True RUL | Predicted RUL | Status |
-|---|---|---|---|---|---|
-| `examples/predict_request.json` | FD001 test 1 (early life) | 31 | 112 | 125.0 (cap) | healthy |
-| `examples/predict_request_min.json` | FD001 test 1, last 30 cycles | 30 | 112 | 125.0 (cap) | healthy |
-| `examples/predict_request_late.json` | FD001 test 34 (smallest true RUL) | 203 | 7 | 6.3 | critical |
-
-`examples/` holds FD001 test engines 1 and 34, with expected results in `examples/expected_predictions.json`. Without a model the API still starts: `/health` reports `"model_loaded": false`, and `/predict` and `/model/info` return 503. Full contract: [docs/06_API_SPECIFICATION.md](docs/06_API_SPECIFICATION.md).
-
-## Run the dashboard
-
-Start the API first (above), then:
-
-```bash
-streamlit run src/predmaint/dashboard/app.py --server.address localhost --server.port 8501   # http://localhost:8501
+```json
+{"unit_id":"test-unit-34","predicted_rul":6.3,"health_status":"critical","cycles_received":203,"cycles_used":30,"last_cycle":203,"model_version":"primary-20261108-f4c86df","warnings":[]}
 ```
 
-The dashboard talks only to the API (`API_BASE_URL`, default `http://localhost:8000`). It reads raw FD001 from `DATA_DIR` for display.
+`GET /health` reports liveness and `model_loaded`; `GET /model/info` reports the served model, selection rule and metrics. Every error uses one envelope `{"error": {"code", "message", "details"}}`. Contract: [docs/06_API_SPECIFICATION.md](docs/06_API_SPECIFICATION.md).
 
-- **Status bar:** API reachable, model loaded, model version (from `/health`); a banner and disabled controls when the API is down or degraded.
-- **Engine explorer:** pick a test or train engine and how many cycles have been observed; shows predicted RUL, a coloured health badge, true RUL at that point, and the kept sensors with the current cycle marked.
-- **RUL trajectory:** one click calls `/predict` every 5 cycles across the engine's life and plots predicted vs true RUL, with the health-band thresholds.
-- **Upload:** post a request JSON (e.g. from `examples/`) and see the response or error envelope verbatim. Works without the dataset.
-- **Model info:** served model, selection rule, metrics, window size, cap, health bands, training time and git SHA.
+## Results
 
-Without the raw dataset, the explorer and trajectory show the download command; the other sections keep working.
+| Model | CV RMSE (5-fold GroupKFold, mean ± std) | Test RMSE | Test MAE | NASA score |
+|---|---|---|---|---|
+| Ridge baseline | 19.15 ± 1.18 | 19.14 | 15.35 | 590.6 |
+| **HistGradientBoosting (served)** | **16.56 ± 0.70** | **16.61** | **12.57** | **441.5** |
 
-Screenshots (added in Milestone 7): `docs/img/dashboard_explorer.png`, `docs/img/dashboard_trajectory.png`, `docs/img/dashboard_upload.png`, `docs/img/dashboard_model_info.png`.
+Test = official FD001 test set, last observed cycle of each of 100 engines, unclipped truth; RUL capped at 125 for training and predictions. CV and test rankings agree (`rankings_agree: true`). Full protocol, search grid, residuals by RUL range and limitations: **[docs/16_EVALUATION_REPORT.md](docs/16_EVALUATION_REPORT.md)**.
 
-## Stack
+## Repository structure
 
-Python 3.13 · pandas · scikit-learn · FastAPI + Pydantic v2 + uvicorn · Streamlit · pytest · ruff · Docker Compose · GitHub Actions. Exact versions: [docs/03_TECH_STACK.md](docs/03_TECH_STACK.md).
+```
+src/predmaint/       data/ (download, load, validate, labels) · features/ · models/ (registry, train,
+                     metrics, artifacts, selection, predict) · api/ (FastAPI) · dashboard/ (Streamlit)
+scripts/             download_data.py · train.py · make_request_payload.py · smoke_test.sh
+tests/               unit, contract, API, dashboard (AppTest), real-data, Docker smoke
+models/              model.joblib + model_metadata.json (served model, committed)
+reports/             metrics per model, model comparison, residuals by RUL bucket
+examples/            demo requests (FD001 test engines 1 and 34) + expected predictions
+docs/                00–17: charter, requirements, architecture, …, decision log, evaluation report
+Dockerfile · docker-compose.yml · .github/workflows/ci.yml
+```
 
-## Documentation
+Full tree with one line per file: [docs/07_REPOSITORY_STRUCTURE.md](docs/07_REPOSITORY_STRUCTURE.md).
 
-Start with [docs/00_PROJECT_CHARTER.md](docs/00_PROJECT_CHARTER.md); current state is in [docs/14_PROJECT_STATUS.md](docs/14_PROJECT_STATUS.md); the build plan is [docs/08_IMPLEMENTATION_PLAN.md](docs/08_IMPLEMENTATION_PLAN.md). All documents: [docs/](docs/).
+## Testing and CI
 
-## Data source
+- **pytest:** 187 tests pass locally (2 opt-in tests skipped). Line coverage 94.98 %, enforced at **85 %** in `pyproject.toml`.
+- **Markers:** `data` (runs when FD001 is present), `network` (`RUN_NETWORK_TESTS=1`), `docker` (`RUN_DOCKER_TESTS=1`).
+- **Kinds of test:** leakage tests (disjoint engine folds, causal features), an inference contract test (API output == offline prediction), the committed-artifact check (scikit-learn version pin, recorded predictions), and real-data tests that recompute the served model's test RMSE.
+- **CI** (GitHub Actions, `ubuntu-24.04`): `lint-test` (ruff + pytest with the coverage gate) and `docker` (`scripts/smoke_test.sh`: build, compose up, both healthchecks, a `/predict` on the late-life example, teardown).
+- Strategy: [docs/09_TESTING_STRATEGY.md](docs/09_TESTING_STRATEGY.md).
 
-NASA Prognostics Center of Excellence Data Repository. Dataset citation (as requested by the repository): A. Saxena and K. Goebel (2008). "Turbofan Engine Degradation Simulation Data Set", NASA Prognostics Data Repository, NASA Ames Research Center, Moffett Field, CA. Paper: A. Saxena, K. Goebel, D. Simon, N. Eklund, "Damage Propagation Modeling for Aircraft Engine Run-to-Failure Simulation", PHM08, 2008. No licence is stated by NASA for this dataset. The dataset is downloaded by script (see [docs/04_DATASET_SPECIFICATION.md](docs/04_DATASET_SPECIFICATION.md)). The only NASA data committed is the small demo excerpt in `examples/` (test engines 1 and 34, ADR-029).
+## Engineering decisions worth noticing
+
+- **GroupKFold by engine.** Cycles of the same engine never appear in both training and validation, so CV estimates performance on unseen engines. [ADR-008](docs/13_DECISION_LOG.md#adr-008--validation-protocol-and-metrics)
+- **Select on CV, report on test.** The served model is chosen by CV RMSE; the official test set stays a held-out report. [ADR-024](docs/13_DECISION_LOG.md#adr-024--served-model-selected-by-cv-rmse-supersedes-adr-010)
+- **One feature path for training and serving.** `features.build` computes every window independently, so the API's 30-cycle request yields bit-identical features; a contract test enforces API == offline. [ADR-005](docs/13_DECISION_LOG.md#adr-005--feature-strategy)
+- **Degraded-mode API.** Without a loadable model the service still starts. `/health` says `model_loaded: false`, `/predict` returns 503 in the standard envelope, and the container healthcheck reads readiness rather than the status code. [ADR-022](docs/13_DECISION_LOG.md#adr-022--503-without-artifact-demo-reproducibility-path), [ADR-028](docs/13_DECISION_LOG.md#adr-028--health-always-200-readiness-via-model_loaded-amends-adr-022)
+- **Committed artifact with version checks.** The 451 KB model ships in git and in the image; scikit-learn is pinned, `/model/info` reports a version match, a test fails on drift, and retraining reproduces it byte-for-byte. [ADR-030](docs/13_DECISION_LOG.md#adr-030--commit-the-served-model-artifact-decides-m6-t4)
+
+All 32 decisions: [docs/13_DECISION_LOG.md](docs/13_DECISION_LOG.md).
+
+## Limitations and future work
+
+- FD001 only (one operating condition, one fault mode; simulated data).
+- Predictions are capped at 125 cycles: engines with longer true RUL are under-predicted, and early-life engines (e.g. test engine 1, true RUL 112) show the cap.
+- On the test set, predictions for engines with 21–60 cycles left are on average ~5 cycles **late** (optimistic).
+- Point predictions only, no uncertainty; health bands are illustrative.
+- The pickled model is tied to the scikit-learn pin.
+- Candidate next steps, **not implemented**: FD002–FD004 with condition normalisation, prediction intervals, bias correction, anomaly detection, drift monitoring. See [docs/16_EVALUATION_REPORT.md §8](docs/16_EVALUATION_REPORT.md).
+
+## Dataset citation and acknowledgment
+
+Data: NASA Prognostics Center of Excellence Data Repository. As requested by the repository: A. Saxena and K. Goebel (2008). "Turbofan Engine Degradation Simulation Data Set", NASA Prognostics Data Repository, NASA Ames Research Center, Moffett Field, CA. Paper: A. Saxena, K. Goebel, D. Simon, N. Eklund, "Damage Propagation Modeling for Aircraft Engine Run-to-Failure Simulation", PHM08, 2008. NASA states no licence for the dataset. It is downloaded by script; the only NASA data in this repository is the small demo excerpt in `examples/` (test engines 1 and 34, ADR-029).
+
+## Licence
+
+Code: [MIT](LICENSE). The licence does not cover the NASA dataset; see the citation above.

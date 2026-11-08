@@ -91,8 +91,12 @@ Ports are published on **127.0.0.1 only**, so nothing is exposed on the LAN by d
   python scripts/train.py --model baseline
   python scripts/train.py --model primary
   python scripts/train.py --select          # writes models/model.joblib + models/model_metadata.json
+  # model_version embeds the git SHA, so refresh the recorded demo expectations (CR-006):
+  python scripts/make_request_payload.py --unit 1 --out examples/predict_request.json --expected examples/expected_predictions.json
+  python scripts/make_request_payload.py --unit 1 --last 30 --out examples/predict_request_min.json --expected examples/expected_predictions.json
+  python scripts/make_request_payload.py --unit 34 --out examples/predict_request_late.json --expected examples/expected_predictions.json
   pytest -q                                 # artifact + real-data checks
-  git add models/model.joblib models/model_metadata.json reports/   # commit the two model files TOGETHER
+  git add models/model.joblib models/model_metadata.json reports/ examples/expected_predictions.json   # commit TOGETHER
   docker compose up -d --build              # rebuild: the model is baked into the image
   ```
 
@@ -113,7 +117,7 @@ Ports are published on **127.0.0.1 only**, so nothing is exposed on the LAN by d
 ## 9. Supported architectures
 
 - **arm64:** built, run and smoke-tested on the dev machine (Apple M1) on 2026-11-08: `SMOKE TEST PASSED (arm64)`, exit 0.
-- **amd64:** the CI `docker` job builds and smoke-tests the image on GitHub's `ubuntu-24.04` (x86_64) runner on every push; its first result is recorded in 14 after the user's push. Wheels for x86_64 were confirmed in M0 (03).
+- **amd64:** confirmed by CI. The `docker` job builds and smoke-tests the image on GitHub's `ubuntu-24.04` (x64) hosted runner on every push; first green run [42509206610](https://github.com/Rakibul-cyber/industrial-ai-predictive-maintenance/actions/runs/42509206610) on `ccf68a7`, docker job 46 s. The Linux bind-mount *write* path is not asserted by the smoke test (a download failure only warns), so it is not separately confirmed by CI (14).
 
 ## 10. Known limits
 

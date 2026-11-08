@@ -154,6 +154,7 @@ Exception classes come from the inference contract (`predmaint.models.predict`, 
 | `NON_CONSECUTIVE_CYCLES` | 422 | `NonConsecutiveCyclesError` | `"cycles must be strictly increasing by exactly 1 in the order given"`, `[]` |
 | `MODEL_UNAVAILABLE` | 503 | `ModelNotAvailableError` (no model loaded) | `"No model loaded from /nonexistent: artifact not found: /nonexistent/model.joblib (run \`python scripts/train.py\`)"`, `[]` |
 | `NOT_FOUND` / `METHOD_NOT_ALLOWED` | 404 / 405 | Starlette HTTP exceptions | `"Not Found"` / `"Method Not Allowed"`, `[]` |
+| `HTTP_ERROR` | any other 4xx/5xx raised as a Starlette `HTTPException` | fallback in `predmaint.api.errors` (no route raises one today) | the exception's detail, `[]` |
 | `INTERNAL_ERROR` | 500 | Any other exception | `"Internal server error"`, `[]`. No traceback in the body; the full traceback is logged. |
 
 ## 7. Logging

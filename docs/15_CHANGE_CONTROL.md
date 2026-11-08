@@ -96,3 +96,15 @@ Append to the "Change records" section below **before** implementing, and get us
 | Affected docs | 02, 06, 07, 08, 09, 10, 14, README, `.env.example`. |
 | Regression tests | `tests/test_dashboard_client.py`, `tests/test_dashboard_helpers.py`, `tests/test_dashboard_app.py`, `tests/test_real_data.py`. |
 | Approval | Requested by the user on 2026-11-08 (M5 authorization). |
+
+### CR-006 — README Option B retrained the model and broke the artifact tests (2026-11-08, M7 fresh-clone run)
+
+| Field | Content |
+|---|---|
+| Reason | Documentation defect (§1.2) found by the M7 fresh-clone verification. |
+| Evidence | Fresh clone of `ccf68a7`, README Option B followed literally (it included the three `train.py` commands): `pytest -q` → `3 failed, 184 passed`, all in `tests/test_model_artifact.py::test_committed_artifact_reproduces_sidecar`, with `assert 'primary-20261108-ccf68a7' == 'primary-20261108-f4c86df'`. The retrained `model.joblib` was byte-identical to the committed one; only `model_version` (which embeds the git SHA) changed, while `examples/expected_predictions.json` still recorded the old version. Doc 10 §6's retraining procedure had the same gap. |
+| Impact | README Option B and doc 10 §6 only. No code, model or contract change. The test is correct: it detects a sidecar that is out of sync with the committed model. |
+| Smallest fix | README: Option B no longer retrains; a separate optional "Retrain" block adds the three `make_request_payload.py --expected` commands that refresh the sidecar. Doc 10 §6: same step, plus `examples/expected_predictions.json` in the commit list. |
+| Affected docs | README, 10, 14. |
+| Regression tests | Existing `tests/test_model_artifact.py` (unchanged). Re-run in the fresh clone: corrected Option B → `187 passed, 2 skipped`; retrain + sidecar refresh → `187 passed, 2 skipped`. |
+| Approval | Documentation defect fix within the authorized milestone (M7). |

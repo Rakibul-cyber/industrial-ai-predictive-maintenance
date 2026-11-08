@@ -1,0 +1,49 @@
+{
+  "description": "Served model residuals on the official FD001 test set (last observed cycle of each of 100 engines), bucketed by unclipped true RUL. error = predicted - true (positive = late = optimistic).",
+  "model_version": "primary-20261108-f4c86df",
+  "model_name": "primary",
+  "test_sha256": "3cda7109ce17bafb5443f2ac926cfcf88154b941b8c4cf95eb55d1ddd6f52851",
+  "rul_sha256": "a19c8ec94931949d0485bdc35118206e9c81c4547b422efb9cf86f4ceddbceca",
+  "computed_at": "2026-11-08T18:26:28Z",
+  "method": "predmaint.features.build.build_features + last_rows + predmaint.models.predict.predict_from_features (clamp [0, rul_cap]) on models/model.joblib",
+  "overall": {
+    "count": 100,
+    "mae": 12.567,
+    "rmse": 16.61,
+    "mean_signed_error": -0.486
+  },
+  "buckets": [
+    {
+      "true_rul_bucket": "0-20",
+      "count": 16,
+      "mae": 3.43,
+      "rmse": 5.821,
+      "mean_signed_error": 1.618,
+      "share_predictions_at_cap": 0.0
+    },
+    {
+      "true_rul_bucket": "21-60",
+      "count": 23,
+      "mae": 8.82,
+      "rmse": 12.476,
+      "mean_signed_error": 5.38,
+      "share_predictions_at_cap": 0.0
+    },
+    {
+      "true_rul_bucket": "61-125",
+      "count": 50,
+      "mae": 14.597,
+      "rmse": 17.586,
+      "mean_signed_error": 1.418,
+      "share_predictions_at_cap": 0.04
+    },
+    {
+      "true_rul_bucket": ">125",
+      "count": 11,
+      "mae": 24.464,
+      "rmse": 26.972,
+      "mean_signed_error": -24.464,
+      "share_predictions_at_cap": 0.0
+    }
+  ]
+}

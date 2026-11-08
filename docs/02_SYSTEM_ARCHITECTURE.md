@@ -1,6 +1,6 @@
 # 02 — System Architecture
 
-Style: **modular monolith** — one Python package `predmaint` (under `src/`), CPU-only, two runtime processes (API, dashboard) built from one Docker image. Rationale: ADR-015, ADR-019.
+Style: **modular monolith** — one Python package `predmaint` (under `src/`), CPU-only, two runtime processes (API, dashboard) built from one Docker image. Rationale: ADR-015, ADR-019, ADR-032.
 
 ## 1. Components and responsibilities
 
@@ -9,10 +9,10 @@ Style: **modular monolith** — one Python package `predmaint` (under `src/`), C
 | Config | `predmaint/config.py` | Single source of defaults (`rul_cap`, `window_size`, seeds, band thresholds, paths) and env-var overrides. | Hold secrets. |
 | Data | `predmaint/data/` | Download + checksum (`download.py`), parse raw files (`load.py`), validate data contract (`validate.py`), compute labels (`labels.py`). | Engineer features. |
 | Features | `predmaint/features/build.py` | Sensor selection, causal rolling features, "last row per unit" extraction. **Single code path used by training, evaluation and the API.** | Fit models. |
-| Models | `predmaint/models/` | Model definitions (`registry.py`), CV + training (`train.py`), metrics (`metrics.py`), artifact save/load + metadata (`artifacts.py`), inference function (`predict.py`). | Know about HTTP. |
+| Models | `predmaint/models/` | Model definitions + 12-config search grid (`registry.py`), CV + training + evaluation (`train.py`), metrics (`metrics.py`), artifact save/load + metadata (`artifacts.py`), ADR-024 selection and promotion (`selection.py`), inference contract (`predict.py`). | Know about HTTP. |
 | API | `predmaint/api/` | FastAPI app (`main.py`), Pydantic schemas (`schemas.py`), model-holder service (`service.py`), error envelope (`errors.py`). | Train models or read raw data files. |
 | Dashboard | `predmaint/dashboard/` | Streamlit UI (`app.py`), a thin HTTP client returning typed results (`api_client.py`), and display helpers (`helpers.py`: true RUL, request bodies, trajectory sampling). | Import model, feature, inference or API-server code, or compute predictions. |
-| CLI scripts | `scripts/` | Thin entrypoints (`download_data.py`, `train.py`, `make_request_payload.py`) that call package functions. | Contain logic. |
+| CLI scripts | `scripts/` | Thin entrypoints (`download_data.py`, `train.py`, `make_request_payload.py`) that call package functions, plus the Docker smoke test `smoke_test.sh`. | Contain logic. |
 
 ## 2. Diagram
 
@@ -29,10 +29,11 @@ flowchart LR
     EVAL --> SEL{ADR-024<br/>selection by CV RMSE}
     SEL --> ART[(models/model.joblib<br/>models/model_metadata.json)]
   end
-  subgraph Runtime["Runtime (docker compose)"]
-    ART -->|read-only volume| API[api: FastAPI :8000]
+  subgraph Runtime["Runtime (docker compose, one image)"]
+    ART -->|committed, baked into image| API[api: FastAPI :8000]
     API -->|features.build + models.predict| API
     DASH[dashboard: Streamlit :8501] -->|HTTP JSON<br/>API_BASE_URL| API
+    NASA -->|first start: download_data.py<br/>into ./data bind mount| DASH
     USER((User)) --> DASH
     CLIENT((curl / client)) --> API
   end
@@ -44,21 +45,21 @@ flowchart LR
 2. `load.py` parses whitespace-delimited, header-less files into named DataFrames; `validate.py` enforces the contract in [04](04_DATASET_SPECIFICATION.md) §6.
 3. No processed data is persisted for the MVP (FD001 parses in well under a second at this size); `data/processed/` is reserved and gitignored.
 
-## 4. Training flow (`scripts/train.py`)
+## 4. Training flow (`scripts/train.py --model baseline`, `--model primary`, `--select`)
 
 1. Verify checksums (NFR-007) → load → validate.
 2. Label train rows (FR-004); determine kept sensors from **train only** (FR-005).
-3. Build features; keep training rows with `cycle ≥ window_size` (ADR-005).
-4. For each candidate (baseline, primary): 5-fold GroupKFold CV by `unit` → fold metrics.
+3. Build features; keep rows that have a full trailing window of `window_size` cycles (= `cycle ≥ window_size` for training histories; ADR-005).
+4. Per candidate run: 5-fold GroupKFold CV by `unit` → fold metrics. The primary run first scores the 12 configurations of the bounded search by CV RMSE (ADR-026) and keeps the best one.
 5. Fit each candidate on all training rows; predict the last row of each test unit; compute test MAE/RMSE/NASA score.
 6. `scripts/train.py --select`: apply ADR-024 (CV RMSE); copy the winner to `model.joblib`, write `model_metadata.json` with the comparison of both candidates, and `reports/model_comparison.{json,md}`.
 
 ## 5. Inference flow (`POST /predict`)
 
 1. Pydantic validates the request shape and types (422 on failure).
-2. Service checks business rules against loaded metadata: required sensors present, ≥ `window_size` records, consecutive cycles (422 with specific codes).
-3. Records → DataFrame → `features.build` (same function as training) → last row.
-4. `models.predict.predict_rul` → clamp to [0, RUL_CAP] (ADR-027) → health status (ADR-025) → out-of-range warnings.
+2. `ModelService` only converts the records and calls `models.predict.predict_rul`, which checks, in order: ≥ `window_size` records, required columns non-null, finite values / integer cycles, consecutive cycles (422 with specific codes; 06 §6).
+3. Only the last `window_size` records → `features.build` (same function as training) → one feature row.
+4. Pipeline predict → clamp to [0, RUL_CAP] (ADR-027) → health status (ADR-025) → out-of-range warnings.
 5. Response with `model_version` from metadata.
 
 The exact contract is in [06](06_API_SPECIFICATION.md); the function-level contract in [05](05_ML_DESIGN.md) §10.
@@ -77,7 +78,7 @@ Confirmed in M5 (the API server log shows the dashboard's real calls; 14 §M5):
 ## 7. Artifact handling
 
 - Produced only by `scripts/train.py` into `MODEL_DIR` (default `models/`).
-- `model.joblib`: a fitted sklearn `Pipeline` (scaler where applicable + estimator). Feature construction parameters (`window_size`, kept sensors, feature order) live in `model_metadata.json` and are applied by `features.build`.
+- `model.joblib`: a fitted sklearn `Pipeline`: a `ColumnTransformer` that selects the 43 training features (so the kept sensors live in the artifact, ADR-023), an optional scaler (baseline only), then the estimator. Feature construction parameters (`window_size`, kept sensors, feature order) are also in `model_metadata.json` and are applied by `features.build`.
 - The served `model.joblib` + `model_metadata.json` are committed (ADR-030) and copied into the image (ADR-032); candidate artifacts stay local. Retraining = train + select + commit both files + rebuild (10 §6).
 - Loaded once at API startup (FastAPI lifespan). Metadata `library_versions.scikit-learn` is compared with the runtime version and exposed as `sklearn_version_match` in `/model/info`; `tests/test_model_artifact.py` fails on a mismatch.
 
@@ -91,4 +92,4 @@ Confirmed in M5 (the API server log shows the dashboard's real calls; 14 §M5):
 | Values outside training range | 200 with entries in `warnings` (not rejected). |
 | Unexpected exception | 500 `INTERNAL_ERROR`; stack trace logged server-side only. |
 | API down / timeout (dashboard) | Dashboard shows "API unreachable at `<API_BASE_URL>`" and disables prediction; no crash. |
-| Dataset download fails / checksum mismatch | `download_data.py` exits non-zero; training refuses to start. |
+| Dataset download fails / checksum mismatch | `download_data.py` exits non-zero; training refuses to start. In the dashboard container it only logs a warning; the explorer and trajectory show the download hint (ADR-031). |
