@@ -5,7 +5,7 @@
 | Current milestone | **MVP COMPLETE** (M0–M7) + M8 (prediction intervals, committed `a25df0e`) + **Milestone 9 (minimal anomaly detection, CR-010) COMPLETE** — uncommitted, awaiting review. FR-019 trend target **not met** (0.680 ≤ 0.7). |
 | Last updated | 2026-11-08 |
 | Git ref | `main` = `origin/main` @ `a25df0e` (M8, committed and pushed by the user; CI run 42514386686 green: lint-test + docker). M9 work is uncommitted. |
-| Next approved action | User review and commit of M9 — commit the two new model files together with the four existing ones (10 §6); the push runs the CI `docker` job with the anomaly assertions. Rebuild any running demo stack with `--build`. Add the screenshots under `docs/img/`. Further work goes through 15. |
+| Next approved action | User review and commit of M9 — commit the two new model files together with the four existing ones (10 §6); the push runs the CI `docker` job with the anomaly assertions. Rebuild any running demo stack with `--build`. Commit `docs/img/` with it (screenshots added, below). Further work goes through 15. |
 
 ## Milestone tracker
 
@@ -410,7 +410,7 @@ $ pytest -q -m data --no-cov → 11 passed   ·   pip check → No broken requir
 | 1 | README Option B retrain broke artifact tests (CR-006) | Medium (docs) | Fixed in M7 |
 | 2 | `HTTP_ERROR` fallback code undocumented | Low (docs) | Fixed in M7 |
 | 3 | Smoke test does not assert that the FD001 download succeeded (Linux bind-mount write path unverified in CI) | Low | Open, candidate next milestone |
-| 4 | Screenshots missing (`docs/img/` absent); README image links broken until added | Low (docs) | Open, owner action |
+| 4 | Screenshots missing (`docs/img/` absent); README image links broken until added | Low (docs) | **Closed 2026-11-08** (post-M9): four screenshots supplied by the owner and placed in `docs/img/` (see "Screenshots" below) |
 | 5 | 16 of 84 public functions lack docstrings (trivial properties, nested helpers, one-line wrappers) | Low | Accepted (no-refactor rule) |
 | 6 | No browser-level dashboard test; AppTest cannot read `st.badge` | Low | Accepted |
 | 7 | Optimistic bias (+5.4 cycles) for true RUL 21–60; cap saturation for RUL > 125 | Model limitation | Documented (16 §6–7) |
@@ -549,7 +549,19 @@ $ pytest -q -m data --no-cov → 13 passed · DATA_DIR=/nonexistent pytest -q �
 - The anomaly metadata records `git_dirty: true` (trained on the uncommitted M9 tree on top of `a25df0e`); its `model_version` is therefore `anomaly-20261108-a25df0e`.
 - Coverage of `src/predmaint`: 95.92 % (from 95.42 %); `models/anomaly.py` 99 %.
 
-## Measured results
+## Screenshots (2026-11-08, docs only, after M9)
+
+The owner supplied four dashboard screenshots as attachments in this session. None were in the repository. Each was identified from its content (active tab), not its filename, and copied to the path the README already references. No code changed, and the README needed no change.
+
+| Source (session attachment) | Destination | Shows | Pixels | Bytes |
+|---|---|---|---|---|
+| `1.png` | `docs/img/dashboard_explorer.png` | Engine explorer, test engine 1 at 31 cycles: RUL 125.0, interval 118.5–125.0, HEALTHY, anomaly 0.67 NORMAL, sensor chart | 1880 × 1388 | 398,676 |
+| `5.png` (replaces `2.png`) | `docs/img/dashboard_trajectory.png` | RUL trajectory, train engine 1, computed: predicted vs capped true RUL over cycles 30–192, shaded 80 % band, dashed health bands, and the anomaly-score chart below | 1296 × 1352 | 207,250 |
+| `6.png` (replaces `3.png`) | `docs/img/dashboard_upload.png` | Upload of `examples/predict_request_late.json`: HTTP 200, CRITICAL, `predicted_rul` 6.3, `rul_lower` 4.84, `rul_upper` 18.76 (engine 34) | 1290 × 1342 | 140,175 |
+| `4.png` | `docs/img/dashboard_model_info.png` | Model info: model card, prediction intervals, anomaly detector (NOT met), metrics | 2880 × 6000 | 814,704 |
+
+The first trajectory and upload screenshots showed empty tabs, so the owner supplied replacements (`5.png`, `6.png`), which overwrote the same paths. **All four screenshots now show their features.** All files are under 2 MB, so none was resized. The upload result matches the sidecar and the M9 smoke test (6.3 in [4.84, 18.76], critical). The explorer values match the M9 `curl` output for `examples/predict_request.json`, which closes AC-11 (11). Each README image link resolves to an existing file.
+
 
 | Item | Value | Source |
 |---|---|---|
